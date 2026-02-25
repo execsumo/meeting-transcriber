@@ -263,6 +263,28 @@ def diarize(
         f"{len(turns)} segments[/green]"
     )
 
+    # Interactive: ask if speaker count is correct, re-run if needed
+    if interactive and not num_speakers and len(speaker_labels) > 1:
+        for label in speaker_labels:
+            t = speaking_times.get(label, 0)
+            m, s = int(t // 60), int(t % 60)
+            time_str = f"{m}:{s:02d}" if m else f"{s}s"
+            console.print(f"  {label} ({time_str})")
+
+        answer = input(
+            f"\n  Correct number of speakers? (Enter=yes, or type number): "
+        ).strip()
+        if answer.isdigit() and int(answer) != len(speaker_labels):
+            corrected = int(answer)
+            console.print(
+                f"[dim]Re-running diarization with {corrected} speakers ...[/dim]"
+            )
+            return diarize(
+                audio_path,
+                num_speakers=corrected,
+                interactive=interactive,
+            )
+
     # Match against saved speaker profiles
     db = load_speaker_db()
     if db:
