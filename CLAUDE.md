@@ -3,14 +3,26 @@
 ## Project Structure
 
 ```
-Meeting_transcriber.py        # Windows version (WASAPI Loopback, faster_whisper)
-meeting_transcriber_mac.py    # macOS version (ProcTap/ScreenCaptureKit, pywhispercpp)
-diarize.py                    # Speaker diarization + voice recognition (pyannote-audio)
-test_e2e_app_audio.py         # E2E test (automated, incl. real ScreenCaptureKit capture)
+src/meeting_transcriber/
+  __init__.py              # __version__, package docstring
+  cli.py                   # Unified CLI entry point (argparse)
+  config.py                # PROTOCOL_PROMPT, defaults (shared between platforms)
+  protocol.py              # generate_protocol_cli(), save_transcript(), save_protocol()
+  diarize.py               # Speaker diarization + voice recognition (pyannote-audio)
+  audio/
+    mac.py                 # list_audio_apps(), choose_app(), record_audio()
+    windows.py             # record_audio() with WASAPI Loopback
+  transcription/
+    mac.py                 # transcribe() with pywhispercpp
+    windows.py             # transcribe() with faster-whisper, get_device()
+tests/
+  conftest.py              # Shared fixtures, markers
+  test_e2e_app_audio.py    # E2E test (automated, incl. real ScreenCaptureKit capture)
+pyproject.toml             # Build config, deps, entry points, ruff, pytest
 docs/mac_implementation_notes.md  # Implementation notes & pain points
-protocols/                    # Output directory (gitignored)
-speakers.json                 # Saved voice profiles (gitignored, created at runtime)
-.env                          # HF_TOKEN for diarization (gitignored)
+protocols/                 # Output directory (gitignored)
+speakers.json              # Saved voice profiles (gitignored, created at runtime)
+.env                       # HF_TOKEN for diarization (gitignored)
 ```
 
 ## Pipeline
@@ -24,11 +36,7 @@ App audio (ProcTap) + Microphone → mix → 16kHz mono WAV → Whisper → [pya
 ```bash
 /opt/homebrew/bin/python3.14 -m venv .venv
 source .venv/bin/activate
-pip install proc-tap pywhispercpp sounddevice numpy rich python-dotenv
-
-# For speaker diarization:
-pip install pyannote.audio
-# Set HF_TOKEN in .env (see .env.example)
+pip install -e ".[mac,diarize,dev]"
 
 # Build ProcTap Swift binary (required!):
 cd .venv/lib/python3.14/site-packages/proctap/swift/screencapture-audio
@@ -39,24 +47,27 @@ swift build -c release
 
 ```bash
 # Lint/format
-ruff check . && ruff format .
+ruff check src/ tests/ && ruff format src/ tests/
 
 # Run macOS transcriber
-python meeting_transcriber_mac.py --app "Microsoft Teams" --title "Meeting"
-python meeting_transcriber_mac.py --file recording.wav --diarize --title "Meeting"
+transcribe --app "Microsoft Teams" --title "Meeting"
+transcribe --file recording.wav --diarize --title "Meeting"
 
-# Run E2E test
-python test_e2e_app_audio.py
-python test_e2e_app_audio.py --lang en
+# Run tests
+pytest tests/ -v
+pytest tests/ -v -m "not slow"
+
+# Run E2E test standalone
+python tests/test_e2e_app_audio.py
 ```
 
 ## Conventions
 
-- Use `ruff` for linting/formatting (defaults, no pyproject.toml)
+- Use `ruff` for linting/formatting (config in pyproject.toml)
 - All code and UI text in English
 - Protocol output generated in German (via Claude prompt)
 - Python 3.14 via homebrew
-- Lazy imports for optional dependencies (pyannote, proctap)
+- Lazy imports for optional dependencies (pyannote, proctap, pywhispercpp)
 
 ## Critical Notes
 

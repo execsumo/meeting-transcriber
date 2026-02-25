@@ -4,3 +4,5 @@ __pycache__/
 .ruff_cache/
 .env
 speakers.json
+dist/
+*.egg-info

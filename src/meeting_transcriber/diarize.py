@@ -1,6 +1,5 @@
 """
 Speaker diarization via pyannote-audio.
-Used by meeting_transcriber_mac.py when --diarize is active.
 
 Features:
 - Speaker diarization (who spoke when)
@@ -14,11 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
-
-load_dotenv()
 
 console = Console()
 
@@ -40,19 +36,17 @@ class TimestampedSegment:
 # ── Speaker Database ─────────────────────────────────────────────────────────
 
 
-def load_speaker_db() -> dict[str, list[float]]:
+def load_speaker_db(db_path: Path = SPEAKERS_DB) -> dict[str, list[float]]:
     """Load saved speaker embeddings from JSON. Returns {name: embedding_vector}."""
-    if not SPEAKERS_DB.exists():
+    if not db_path.exists():
         return {}
-    data = json.loads(SPEAKERS_DB.read_text(encoding="utf-8"))
+    data = json.loads(db_path.read_text(encoding="utf-8"))
     return data
 
 
-def save_speaker_db(db: dict[str, list[float]]) -> None:
+def save_speaker_db(db: dict[str, list[float]], db_path: Path = SPEAKERS_DB) -> None:
     """Save speaker embeddings to JSON."""
-    SPEAKERS_DB.write_text(
-        json.dumps(db, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    db_path.write_text(json.dumps(db, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -110,6 +104,7 @@ def prompt_speaker_names(
     embeddings: dict[str, np.ndarray],
     speaking_times: dict[str, float],
     db: dict[str, list[float]],
+    db_path: Path = SPEAKERS_DB,
 ) -> dict[str, str]:
     """Ask the user to name unrecognized speakers and save their embeddings."""
     updated = False
@@ -135,8 +130,8 @@ def prompt_speaker_names(
             console.print(f"  [green]Saved:[/green] {name}")
 
     if updated:
-        save_speaker_db(db)
-        console.print(f"[dim]Speaker profiles saved to {SPEAKERS_DB}[/dim]")
+        save_speaker_db(db, db_path)
+        console.print(f"[dim]Speaker profiles saved to {db_path}[/dim]")
 
     return mapping
 
@@ -176,14 +171,10 @@ def merge_similar_speakers(
         return turns, embeddings
 
     # Apply merge to turns
-    merged_turns = [
-        (start, end, merge_map.get(s, s)) for start, end, s in turns
-    ]
+    merged_turns = [(start, end, merge_map.get(s, s)) for start, end, s in turns]
 
     # Remove merged embeddings
-    merged_embeddings = {
-        k: v for k, v in embeddings.items() if k not in merge_map
-    }
+    merged_embeddings = {k: v for k, v in embeddings.items() if k not in merge_map}
 
     return merged_turns, merged_embeddings
 
@@ -202,7 +193,10 @@ def diarize(
 
     Returns list of (start_sec, end_sec, speaker_name) tuples.
     """
+    from dotenv import load_dotenv
     from pyannote.audio import Pipeline
+
+    load_dotenv()
 
     token = os.environ.get("HF_TOKEN")
 
@@ -272,7 +266,7 @@ def diarize(
             console.print(f"  {label} ({time_str})")
 
         answer = input(
-            f"\n  Correct number of speakers? (Enter=yes, or type number): "
+            "\n  Correct number of speakers? (Enter=yes, or type number): "
         ).strip()
         if answer.isdigit() and int(answer) != len(speaker_labels):
             corrected = int(answer)
@@ -295,7 +289,7 @@ def diarize(
 
     # Ask for names of unrecognized speakers
     if interactive and embeddings:
-        unrecognized = [l for l, n in mapping.items() if l == n]
+        unrecognized = [label for label, name in mapping.items() if label == name]
         if unrecognized:
             console.print("\n[bold]Unknown speakers:[/bold]")
             mapping = prompt_speaker_names(mapping, embeddings, speaking_times, db)
@@ -330,7 +324,7 @@ def assign_speakers(
 
 
 def format_diarized_transcript(segments: list[TimestampedSegment]) -> str:
-    """Format segments with speaker labels, grouping consecutive same-speaker segments."""
+    """Format segments with speaker labels, grouping consecutive segments."""
     if not segments:
         return ""
 

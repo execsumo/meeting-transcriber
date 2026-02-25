@@ -1,0 +1,58 @@
+"""Shared configuration constants."""
+
+from pathlib import Path
+
+DEFAULT_WHISPER_MODEL_MAC = "large-v3-turbo-q5_0"
+DEFAULT_WHISPER_MODEL_WIN = "large"
+DEFAULT_OUTPUT_DIR = Path("./protocols")
+TARGET_RATE = 16000
+
+PROTOCOL_PROMPT = """You are a professional meeting minute taker.
+Create a structured meeting protocol in German from the following transcript.
+
+Return ONLY the finished Markdown document - no explanations, no introduction,
+no comments before or after.
+
+Use exactly this structure:
+
+# Meeting Protocol - [Meeting Title]
+**Date:** [Date from context or today]
+
+---
+
+## Summary
+[3-5 sentence summary of the meeting]
+
+## Participants
+- [Name 1]
+- [Name 2]
+
+## Topics Discussed
+
+### [Topic 1]
+[What was discussed]
+
+### [Topic 2]
+[What was discussed]
+
+## Decisions
+- [Decision 1]
+- [Decision 2]
+
+## Tasks
+| Task | Responsible | Deadline | Priority |
+|------|-------------|----------|----------|
+| [Description] | [Name] | [Date or open] | 🔴 high / 🟡 medium / 🟢 low |
+
+## Open Questions
+- [Question 1]
+- [Question 2]
+
+---
+
+## Full Transcript
+[Insert the full transcript here]
+
+---
+Transcript:
+"""
