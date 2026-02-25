@@ -1,19 +1,24 @@
 # Meeting Transcriber
 
-Automatic recording, transcription, and protocol generation for meetings – locally on Windows, no cloud costs.
+[![CI](https://github.com/meanstone/Transcriber/actions/workflows/ci.yml/badge.svg)](https://github.com/meanstone/Transcriber/actions/workflows/ci.yml)
+
+Record meetings, transcribe with Whisper, and generate structured protocols with Claude — fully local, no cloud transcription costs.
 
 ```
-Microphone + System Audio → faster-whisper → Claude CLI → Markdown Protocol
+App/System Audio + Microphone → Whisper → [Speaker Diarization] → Claude → Markdown Protocol
 ```
 
 ---
 
 ## Features
 
-- **Dual audio recording** – Microphone and system audio (Teams, Zoom, etc.) simultaneously via WASAPI Loopback, no virtual cable needed
-- **Local transcription** – [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Whisper large), automatic GPU detection (CUDA) or CPU fallback
-- **AI protocol** – Structured Markdown via [Claude Code CLI](https://claude.ai/code), no separate API key needed
-- **Flexible input** – Audio file (wav, mp3, m4a, ...) or existing `.txt` transcript
+- **Dual audio recording** — Microphone + app audio simultaneously (Teams, Zoom, etc.)
+  - macOS: ProcTap / ScreenCaptureKit
+  - Windows: WASAPI Loopback
+- **Local transcription** — [pywhispercpp](https://github.com/aarnphm/pywhispercpp) (macOS) / [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Windows)
+- **Speaker diarization** — Identify and label speakers via [pyannote-audio](https://github.com/pyannote/pyannote-audio), with saved voice profiles
+- **AI protocol generation** — Structured Markdown via [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+- **Flexible input** — Live recording, audio file (wav, mp3, m4a), or existing transcript (.txt)
 
 ---
 
@@ -26,98 +31,118 @@ All files are saved to `./protocols/`:
 | `20260225_1400_meeting.txt` | Raw transcript |
 | `20260225_1400_meeting.md` | Structured protocol |
 
-**Protocol structure:**
-- Summary
-- Participants
-- Topics Discussed
-- Decisions
-- Tasks (table with responsible person, deadline, priority)
-- Open Questions
-- Full Transcript
+**Protocol structure:** Summary, Participants, Topics Discussed, Decisions, Tasks (table with responsible person, deadline, priority), Open Questions, Full Transcript.
 
 ---
 
 ## Prerequisites
 
-### Software
-- Python 3.10+
-- [Claude Code CLI](https://claude.ai/code) – installed and logged in (`claude --version`)
-- Node.js 20+ (for Claude Code)
+- Python 3.12+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) — installed and logged in (`claude --version`)
 
-### Python Packages
+For diarization (optional):
+- HuggingFace token in `.env` (`HF_TOKEN=...`)
+- Accepted licenses for pyannote models
+
+---
+
+## Installation
+
+### macOS
 
 ```bash
-pip install faster-whisper pyaudiowpatch numpy rich
+git clone https://github.com/meanstone/Transcriber
+cd Transcriber
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[mac,dev]"
+
+# Optional: speaker diarization
+pip install -e ".[mac,diarize,dev]"
 ```
 
-For GPU acceleration (optional, recommended):
+ProcTap Swift binary must be built manually for app audio capture:
+
+```bash
+cd .venv/lib/python3.*/site-packages/proctap/swift/screencapture-audio
+swift build -c release
+```
+
+### Windows
+
+```bash
+git clone https://github.com/meanstone/Transcriber
+cd Transcriber
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[windows,dev]"
+```
+
+For GPU acceleration (optional):
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
 
 ---
 
-## Installation
-
-```bash
-git clone https://github.com/meanstone/Meeting_transcriber
-cd Meeting_transcriber
-pip install faster-whisper pyaudiowpatch numpy rich
-```
-
----
-
 ## Usage
 
-### Live recording (microphone + system audio)
+### Live recording
+
 ```bash
-python Meeting_transcriber.py --title "Project Meeting"
+# macOS — record app audio + microphone
+transcribe --app "Microsoft Teams" --title "Sprint Review"
+
+# macOS — microphone only
+transcribe --mic-only --title "Interview"
+
+# Windows — system audio + microphone
+transcribe --title "Project Meeting"
 ```
-→ Press **Enter** to stop recording.
+
+Press **Enter** to stop recording.
 
 ### Transcribe audio file
+
 ```bash
-python Meeting_transcriber.py --file recording.mp3 --title "Sprint Review"
+transcribe --file recording.mp3 --title "Sprint Review"
 ```
 
-### Protocol from existing transcript only
+### With speaker diarization
+
 ```bash
-python Meeting_transcriber.py --file protocols/transcript.txt --title "Team Meeting"
+transcribe --file recording.wav --diarize --title "Team Meeting"
+transcribe --file recording.wav --diarize --speakers 3 --title "Team Meeting"
 ```
-Whisper is skipped, Claude generates the protocol directly.
+
+### Protocol from existing transcript
+
+```bash
+transcribe --file protocols/transcript.txt --title "Standup"
+```
+
+### List available apps (macOS)
+
+```bash
+transcribe --list-apps
+```
 
 ---
 
-## Configuration
+## CLI Reference
 
-At the top of `Meeting_transcriber.py`:
-
-```python
-WHISPER_MODEL = "large"   # tiny | base | small | medium | large
-WHISPER_LANG  = None      # None = auto-detect, "de" = force German
-OUTPUT_DIR    = Path("./protocols")
-```
-
-| Model | Quality | GPU VRAM | Speed |
-|-------|---------|----------|-------|
-| `tiny` | low | ~1 GB | very fast |
-| `base` | good | ~1 GB | fast |
-| `small` | very good | ~2 GB | medium |
-| `medium` | excellent | ~5 GB | slow |
-| `large` | best | ~10 GB | very slow |
-
----
-
-## Recording Teams / Zoom Audio
-
-The script uses **WASAPI Loopback** – this captures system audio directly from the Windows audio mixer:
-
-1. Start Teams/Zoom call
-2. Start the script (`python Meeting_transcriber.py`)
-3. Recording runs automatically with microphone + remote participants
-4. Press Enter to stop
-
-> **Note:** Jabra and some USB headsets change the default speaker – check Windows Settings → Sound → Output to see which device is active.
+| Flag | Description |
+|------|-------------|
+| `--file, -f` | Audio file or transcript (.txt) |
+| `--title, -t` | Meeting title (default: "Meeting") |
+| `--output-dir, -o` | Output directory (default: `./protocols`) |
+| `--model, -m` | Whisper model (macOS default: `large-v3-turbo-q5_0`, Windows: `large`) |
+| `--app, -a` | App name for audio capture (macOS) |
+| `--pid` | Process ID for app audio (macOS) |
+| `--list-apps` | List running apps and exit (macOS) |
+| `--mic-only` | Microphone only, no app audio (macOS) |
+| `--diarize` | Enable speaker diarization |
+| `--speakers` | Expected number of speakers |
 
 ---
 
@@ -125,8 +150,14 @@ The script uses **WASAPI Loopback** – this captures system audio directly from
 
 | Problem | Solution |
 |---------|----------|
-| `claude not found` | Test `claude --version` in terminal, reinstall if needed |
-| No system audio recorded | Check default output device in Windows sound settings |
-| GPU not detected | `pip install torch` with CUDA version, check `nvidia-smi` |
-| Transcript in English | Set `WHISPER_LANG = "de"` |
-| Protocol empty | Test `echo Hello | claude --print` in terminal |
+| `claude not found` | Install Claude Code CLI, run `claude --version` |
+| No app audio (macOS) | Grant Screen Recording permission (System Settings → Privacy & Security) |
+| ProcTap delivers 0 chunks | Build the Swift binary (see Installation) |
+| No system audio (Windows) | Check default output device in Windows sound settings |
+| GPU not detected (Windows) | Install torch with CUDA, check `nvidia-smi` |
+
+---
+
+## License
+
+[MIT](LICENSE)
