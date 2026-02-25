@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
 Meeting Transcriber
-Aufnahme → Whisper (Transkription) → Claude (Protokoll + Tasks)
+Recording → Whisper (Transcription) → Claude (Protocol + Tasks)
 
 Setup:
     pip install openai-whisper anthropic pyaudio wave rich
 
-Für GPU-Beschleunigung (optional):
+For GPU acceleration (optional):
     pip install torch torchvision torchaudio
 
-Umgebungsvariable setzen:
+Set environment variable:
     export ANTHROPIC_API_KEY="sk-ant-..."
 """
 
@@ -30,70 +30,70 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
-# ── Konfiguration ────────────────────────────────────────────────────────────
+# ── Configuration ────────────────────────────────────────────────────────────
 
 WHISPER_MODEL   = "large"          # tiny | base | small | medium | large
 WHISPER_LANG    = None                # None = auto-detect
 CLAUDE_MODEL    = "claude-opus-4-6"
-OUTPUT_DIR      = Path("./protokolle")
+OUTPUT_DIR      = Path("./protocols")
 
-PROTOCOL_PROMPT = """Du bist ein professioneller Meeting-Protokollant.
-Erstelle aus dem folgenden Transkript ein strukturiertes Meetingprotokoll auf Deutsch.
+PROTOCOL_PROMPT = """You are a professional meeting minute taker.
+Create a structured meeting protocol in German from the following transcript.
 
-Gib NUR das fertige Markdown-Dokument zurück – keine Erklärungen, keine Einleitung, kein Kommentar davor oder danach.
+Return ONLY the finished Markdown document – no explanations, no introduction, no comments before or after.
 
-Verwende exakt diese Struktur:
+Use exactly this structure:
 
-# Meetingprotokoll – [Titel des Meetings]
-**Datum:** [Datum aus dem Kontext oder heute]
+# Meeting Protocol – [Meeting Title]
+**Date:** [Date from context or today]
 
 ---
 
-## Zusammenfassung
-[3-5 Sätze Zusammenfassung des Meetings]
+## Summary
+[3-5 sentence summary of the meeting]
 
-## Teilnehmer
+## Participants
 - [Name 1]
 - [Name 2]
 
-## Besprochene Themen
+## Topics Discussed
 
-### [Thema 1]
-[Was wurde dazu besprochen]
+### [Topic 1]
+[What was discussed]
 
-### [Thema 2]
-[Was wurde dazu besprochen]
+### [Topic 2]
+[What was discussed]
 
-## Entscheidungen
-- [Entscheidung 1]
-- [Entscheidung 2]
+## Decisions
+- [Decision 1]
+- [Decision 2]
 
 ## Tasks
-| Task | Verantwortlich | Deadline | Priorität |
-|------|----------------|----------|-----------|
-| [Beschreibung] | [Name] | [Datum oder offen] | 🔴 hoch / 🟡 mittel / 🟢 niedrig |
+| Task | Responsible | Deadline | Priority |
+|------|-------------|----------|----------|
+| [Description] | [Name] | [Date or open] | 🔴 high / 🟡 medium / 🟢 low |
 
-## Offene Fragen
-- [Frage 1]
-- [Frage 2]
-
----
-
-## Vollständiges Transkript
-[Das vollständige Transkript hier einfügen]
+## Open Questions
+- [Question 1]
+- [Question 2]
 
 ---
-Transkript:
+
+## Full Transcript
+[Insert the full transcript here]
+
+---
+Transcript:
 """
 
-# ── Audio-Aufnahme ───────────────────────────────────────────────────────────
+# ── Audio Recording ──────────────────────────────────────────────────────────
 
 def record_audio(output_path: Path, sample_rate: int = 16000) -> Path:
-    """Nimmt Mikrofon + Systemton (WASAPI Loopback) gleichzeitig auf und mischt sie."""
+    """Record microphone + system audio (WASAPI Loopback) simultaneously and mix them."""
     try:
         import pyaudiowpatch as pyaudio
     except ImportError:
-        console.print("[red]pyaudiowpatch nicht installiert: pip install pyaudiowpatch[/red]")
+        console.print("[red]pyaudiowpatch not installed: pip install pyaudiowpatch[/red]")
         sys.exit(1)
 
     CHUNK = 1024
@@ -103,14 +103,14 @@ def record_audio(output_path: Path, sample_rate: int = 16000) -> Path:
 
     pa = pyaudio.PyAudio()
 
-    # Standard-Mikrofon
+    # Default microphone
     mic_stream = pa.open(
         format=pyaudio.paInt16, channels=1,
         rate=sample_rate, input=True,
         frames_per_buffer=CHUNK
     )
 
-    # WASAPI Loopback (Systemton)
+    # WASAPI Loopback (system audio)
     loopback_stream = None
     loopback_rate = sample_rate
     try:
@@ -126,10 +126,10 @@ def record_audio(output_path: Path, sample_rate: int = 16000) -> Path:
                     input_device_index=loopback_dev["index"],
                     frames_per_buffer=CHUNK
                 )
-                console.print(f"[dim]Systemton-Loopback aktiv: {loopback_dev['name']} ({loopback_rate} Hz)[/dim]")
+                console.print(f"[dim]System audio loopback active: {loopback_dev['name']} ({loopback_rate} Hz)[/dim]")
                 break
     except Exception as e:
-        console.print(f"[yellow]⚠ Kein Loopback verfügbar ({type(e).__name__}), nur Mikrofon.[/yellow]")
+        console.print(f"[yellow]No loopback available ({type(e).__name__}), microphone only.[/yellow]")
 
     def record_mic():
         while not stop_event.is_set():
@@ -141,7 +141,7 @@ def record_audio(output_path: Path, sample_rate: int = 16000) -> Path:
         while not stop_event.is_set():
             frames_loop.append(loopback_stream.read(CHUNK, exception_on_overflow=False))
 
-    console.print("\n[bold green]🎙  Aufnahme läuft ...[/bold green]  [dim]Drücke Enter zum Stoppen[/dim]\n")
+    console.print("\n[bold green]Recording ...[/bold green]  [dim]Press Enter to stop[/dim]\n")
     t_mic  = threading.Thread(target=record_mic,      daemon=True)
     t_loop = threading.Thread(target=record_loopback, daemon=True)
     t_mic.start()
@@ -157,12 +157,12 @@ def record_audio(output_path: Path, sample_rate: int = 16000) -> Path:
         loopback_stream.stop_stream(); loopback_stream.close()
     pa.terminate()
 
-    # Bytes → numpy, mischen
+    # Bytes → numpy, mix
     to_np = lambda frames: np.frombuffer(b"".join(frames), dtype=np.int16).astype(np.float32) / 32768.0
     audio_mic  = to_np(frames_mic)  if frames_mic  else np.zeros(0)
     audio_loop = to_np(frames_loop) if frames_loop else np.zeros(0)
 
-    # Loopback resampeln falls nötig
+    # Resample loopback if needed
     if len(audio_loop) > 0 and loopback_rate != sample_rate:
         ratio = sample_rate / loopback_rate
         new_len = int(len(audio_loop) * ratio)
@@ -187,58 +187,58 @@ def record_audio(output_path: Path, sample_rate: int = 16000) -> Path:
         wf.writeframes(audio_int16.tobytes())
 
     duration = len(mixed) / sample_rate
-    console.print(f"[green]✓ Aufnahme gespeichert ({duration:.1f}s): {output_path}[/green]")
+    console.print(f"[green]Recording saved ({duration:.1f}s): {output_path}[/green]")
     return output_path
 
-# ── Transkription ────────────────────────────────────────────────────────────
+# ── Transcription ────────────────────────────────────────────────────────────
 
 def get_device() -> tuple[str, str]:
-    """Erkennt automatisch die schnellste verfügbare Hardware."""
+    """Automatically detect the fastest available hardware."""
     try:
         import torch
         if torch.cuda.is_available():
             gpu = torch.cuda.get_device_name(0)
-            console.print(f"[green]GPU erkannt:[/green] {gpu} → CUDA (float16)")
+            console.print(f"[green]GPU detected:[/green] {gpu} → CUDA (float16)")
             return "cuda", "float16"
     except ImportError:
         pass
-    console.print("[dim]Kein GPU gefunden → CPU (int8)[/dim]")
+    console.print("[dim]No GPU found → CPU (int8)[/dim]")
     return "cpu", "int8"
 
 
 def transcribe(audio_path: Path) -> str:
-    """Transkribiert eine Audiodatei mit Whisper."""
+    """Transcribe an audio file with Whisper."""
     device, compute_type = get_device()
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         transient=True,
     ) as progress:
-        progress.add_task(f"Lade Whisper-Modell [bold]{WHISPER_MODEL}[/bold] ...", total=None)
+        progress.add_task(f"Loading Whisper model [bold]{WHISPER_MODEL}[/bold] ...", total=None)
         model = WhisperModel(WHISPER_MODEL, device=device, compute_type=compute_type)
 
-    console.print(f"[dim]Modell geladen. Starte Transkription ...[/dim]")
+    console.print(f"[dim]Model loaded. Starting transcription ...[/dim]")
 
     with Progress(SpinnerColumn(), TextColumn("{task.description}"), transient=True) as progress:
-        progress.add_task("Transkribiere Audio ...", total=None)
+        progress.add_task("Transcribing audio ...", total=None)
         segments, _ = model.transcribe(
             str(audio_path),
             language=WHISPER_LANG,
         )
 
     text = " ".join(segment.text for segment in segments).strip()
-    console.print(f"[green]✓ Transkription fertig ({len(text)} Zeichen)[/green]")
+    console.print(f"[green]Transcription complete ({len(text)} characters)[/green]")
     return text
 
-# ── Protokoll via Claude CLI ──────────────────────────────────────────────────
+# ── Protocol via Claude CLI ───────────────────────────────────────────────────
 
 def generate_protocol_cli(transcript: str) -> str:
-    """Ruft claude --print via PowerShell auf (findet .cmd-Dateien auf Windows)."""
+    """Call claude --print via PowerShell (finds .cmd files on Windows)."""
     import subprocess
 
     prompt = PROTOCOL_PROMPT + transcript
 
-    # Prompt in Datei schreiben (umgeht Argumentlängen-Limit)
+    # Write prompt to file (bypasses argument length limit)
     tmp_in = tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8")
     tmp_in.write(prompt)
     tmp_in.close()
@@ -248,10 +248,10 @@ def generate_protocol_cli(transcript: str) -> str:
     tmp_out.close()
     out_file = Path(tmp_out.name)
 
-    console.print("[dim]Erstelle Protokoll mit Claude CLI ...[/dim]")
+    console.print("[dim]Generating protocol with Claude CLI ...[/dim]")
 
-    # shell=True → cmd.exe findet claude.cmd automatisch im PATH
-    # stdin/stdout als Python-File-Objekte: kein cmd-Redirect, kein Pfad-Problem
+    # shell=True → cmd.exe finds claude.cmd automatically in PATH
+    # stdin/stdout as Python file objects: no cmd redirect, no path issues
     try:
         with open(in_file, "r", encoding="utf-8") as fin, \
              open(out_file, "w", encoding="utf-8") as fout:
@@ -263,7 +263,7 @@ def generate_protocol_cli(transcript: str) -> str:
                 timeout=300,
             )
     except subprocess.TimeoutExpired:
-        console.print("[red]Timeout – Claude hat zu lange gebraucht (>5 min).[/red]")
+        console.print("[red]Timeout – Claude took too long (>5 min).[/red]")
         sys.exit(1)
     finally:
         in_file.unlink(missing_ok=True)
@@ -274,48 +274,48 @@ def generate_protocol_cli(transcript: str) -> str:
         out_file.unlink(missing_ok=True)
 
     if not text:
-        console.print("[red]Protokoll ist leer.[/red]")
-        console.print("[dim]Tipp: Teste manuell im Terminal: echo Hallo | claude --print[/dim]")
+        console.print("[red]Protocol is empty.[/red]")
+        console.print("[dim]Tip: Test manually in terminal: echo Hello | claude --print[/dim]")
         sys.exit(1)
 
     return text
 
-# ── Ausgabe ──────────────────────────────────────────────────────────────────
+# ── Output ───────────────────────────────────────────────────────────────────
 
 def format_markdown(protocol: dict, transcript: str, meeting_title: str) -> str:
-    """Wandelt das Protokoll-Dict in ein schönes Markdown-Dokument um."""
+    """Convert the protocol dict into a formatted Markdown document."""
     now = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
     lines = [
-        f"# Meetingprotokoll – {meeting_title}",
-        f"**Datum:** {now}",
+        f"# Meeting Protocol – {meeting_title}",
+        f"**Date:** {now}",
         "",
         "---",
         "",
-        "## 📋 Zusammenfassung",
+        "## Summary",
         protocol.get("zusammenfassung", "–"),
         "",
     ]
 
     if protocol.get("teilnehmer"):
-        lines += ["## 👥 Teilnehmer",
+        lines += ["## Participants",
                   ", ".join(protocol["teilnehmer"]), ""]
 
     if protocol.get("themen"):
-        lines.append("## 📌 Besprochene Themen")
+        lines.append("## Topics Discussed")
         for t in protocol["themen"]:
             lines += [f"### {t['titel']}", t["inhalt"], ""]
 
     if protocol.get("entscheidungen"):
-        lines.append("## ✅ Entscheidungen")
+        lines.append("## Decisions")
         for e in protocol["entscheidungen"]:
             lines.append(f"- {e}")
         lines.append("")
 
     if protocol.get("tasks"):
         lines += [
-            "## 📝 Tasks",
-            "| Task | Verantwortlich | Deadline | Priorität |",
-            "|------|---------------|----------|-----------|",
+            "## Tasks",
+            "| Task | Responsible | Deadline | Priority |",
+            "|------|-------------|----------|----------|",
         ]
         prio_icon = {"hoch": "🔴", "mittel": "🟡", "niedrig": "🟢"}
         for task in protocol["tasks"]:
@@ -330,12 +330,12 @@ def format_markdown(protocol: dict, transcript: str, meeting_title: str) -> str:
         lines.append("")
 
     if protocol.get("offene_fragen"):
-        lines.append("## ❓ Offene Fragen")
+        lines.append("## Open Questions")
         for f in protocol["offene_fragen"]:
             lines.append(f"- {f}")
         lines.append("")
 
-    lines += ["---", "## 🎙 Vollständiges Transkript", "", transcript]
+    lines += ["---", "## Full Transcript", "", transcript]
     return "\n".join(lines)
 
 def save_transcript(transcript: str, title: str) -> Path:
@@ -350,49 +350,49 @@ def save_transcript(transcript: str, title: str) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Meeting aufnehmen oder Audiodatei transkribieren und als .txt speichern"
+        description="Record a meeting or transcribe an audio file and save as .txt"
     )
     parser.add_argument("--file", "-f", type=Path,
-                        help="Audio-Datei (mp3, wav, m4a, ...) ODER Transkript (.txt)")
+                        help="Audio file (mp3, wav, m4a, ...) OR transcript (.txt)")
     parser.add_argument("--title", "-t", default="Meeting",
-                        help="Meeting-Titel für die Ausgabedatei")
+                        help="Meeting title for the output file")
     args = parser.parse_args()
 
-    console.rule("[bold]🎙 Meeting Transcriber[/bold]")
+    console.rule("[bold]Meeting Transcriber[/bold]")
 
-    # 1. Audio-Quelle bestimmen
+    # 1. Determine audio source
     if args.file and args.file.suffix.lower() == ".txt":
-        # Transkript-Datei direkt einlesen, Whisper überspringen
-        console.print(f"[blue]Transkript-Datei erkannt:[/blue] {args.file}")
+        # Read transcript file directly, skip Whisper
+        console.print(f"[blue]Transcript file detected:[/blue] {args.file}")
         transcript = args.file.read_text(encoding="utf-8").strip()
-        console.print(f"[green]✓ Transkript geladen ({len(transcript)} Zeichen)[/green]")
+        console.print(f"[green]Transcript loaded ({len(transcript)} characters)[/green]")
     else:
         if args.file:
             audio_path = args.file
-            console.print(f"[blue]Verwende Audio-Datei:[/blue] {audio_path}")
+            console.print(f"[blue]Using audio file:[/blue] {audio_path}")
         else:
             tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             audio_path = Path(tmp.name)
             tmp.close()
             record_audio(audio_path)
 
-        # 2. Transkription
+        # 2. Transcription
         transcript = transcribe(audio_path)
 
-        # 3. Transkript speichern
+        # 3. Save transcript
         save_transcript(transcript, args.title)
 
-    # 4. Protokoll via Claude CLI
+    # 4. Protocol via Claude CLI
     protocol_md = generate_protocol_cli(transcript)
 
-    # 5. Protokoll speichern
+    # 5. Save protocol
     OUTPUT_DIR.mkdir(exist_ok=True)
     slug = args.title.lower().replace(" ", "_")
     date = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     out_path = OUTPUT_DIR / f"{date}_{slug}.md"
     out_path.write_text(protocol_md, encoding="utf-8")
 
-    console.print(f"\n[bold green]✓ Protokoll gespeichert:[/bold green] {out_path}")
+    console.print(f"\n[bold green]Protocol saved:[/bold green] {out_path}")
     console.print(Markdown(protocol_md))
 
 if __name__ == "__main__":
