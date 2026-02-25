@@ -277,7 +277,7 @@ def record_audio(
 # ── Transcription ────────────────────────────────────────────────────────────
 
 
-def transcribe(audio_path: Path) -> str:
+def transcribe(audio_path: Path, diarize_enabled: bool = False) -> str:
     """Transcribe an audio file with pywhispercpp (whisper.cpp)."""
     from pywhispercpp.model import Model
 
@@ -306,17 +306,48 @@ def transcribe(audio_path: Path) -> str:
         progress.add_task("Transcribing audio ...", total=None)
         segments = model.transcribe(str(audio_path), language=WHISPER_LANG)
 
-    text = " ".join(seg.text for seg in segments).strip()
-    console.print(f"[green]Transcription complete ({len(text)} characters)[/green]")
+    if not diarize_enabled:
+        text = " ".join(seg.text for seg in segments).strip()
+        console.print(f"[green]Transcription complete ({len(text)} characters)[/green]")
+        return text
+
+    from diarize import (
+        TimestampedSegment,
+        assign_speakers,
+        diarize,
+        format_diarized_transcript,
+    )
+
+    ts_segments = [
+        TimestampedSegment(start=seg.t0 * 0.01, end=seg.t1 * 0.01, text=seg.text)
+        for seg in segments
+    ]
+
+    turns = diarize(audio_path)
+    ts_segments = assign_speakers(ts_segments, turns)
+    text = format_diarized_transcript(ts_segments)
+
+    console.print(
+        f"[green]Transcription + diarization complete ({len(text)} characters)[/green]"
+    )
     return text
 
 
 # ── Protocol via Claude CLI ──────────────────────────────────────────────────
 
 
-def generate_protocol_cli(transcript: str) -> str:
+def generate_protocol_cli(transcript: str, diarized: bool = False) -> str:
     """Call claude --print and pass the transcript via stdin."""
-    prompt = PROTOCOL_PROMPT + transcript
+    prompt = PROTOCOL_PROMPT
+    if diarized:
+        prompt += (
+            "\nNote: The transcript contains speaker labels like [SPEAKER_00], "
+            "[SPEAKER_01] etc. Use these to identify different participants. "
+            "In the Participants section, list them as Speaker 1, Speaker 2 etc. "
+            "(or by name if mentioned in the conversation). "
+            "In the Topics Discussed section, attribute key statements to speakers.\n\n"
+        )
+    prompt += transcript
 
     tmp_in = tempfile.NamedTemporaryFile(
         suffix=".txt", delete=False, mode="w", encoding="utf-8"
@@ -429,6 +460,11 @@ def main():
         default=WHISPER_MODEL,
         help=f"Whisper model (default: {WHISPER_MODEL})",
     )
+    parser.add_argument(
+        "--diarize",
+        action="store_true",
+        help="Enable speaker diarization (requires pyannote.audio + HuggingFace token)",
+    )
     args = parser.parse_args()
     WHISPER_MODEL = args.model
 
@@ -473,14 +509,15 @@ def main():
             record_audio(audio_path, app_pid=app_pid, mic_only=args.mic_only)
 
         # 2. Transcription
-        transcript = transcribe(audio_path)
+        transcript = transcribe(audio_path, diarize_enabled=args.diarize)
 
         # 3. Save transcript
         txt_path = save_transcript(transcript, args.title)
         console.print(f"[dim]Transcript saved: {txt_path}[/dim]")
 
     # 4. Protocol via Claude CLI
-    protocol_md = generate_protocol_cli(transcript)
+    diarized = "[SPEAKER_" in transcript
+    protocol_md = generate_protocol_cli(transcript, diarized=diarized)
 
     # 5. Save protocol
     OUTPUT_DIR.mkdir(exist_ok=True)
