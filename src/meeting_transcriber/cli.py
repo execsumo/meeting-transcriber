@@ -84,6 +84,17 @@ def main():
         action="store_true",
         help="Record microphone only, no app audio (macOS only)",
     )
+    parser.add_argument(
+        "--list-mics",
+        action="store_true",
+        help="List available microphone devices and exit (macOS only)",
+    )
+    parser.add_argument(
+        "--mic",
+        type=str,
+        default=None,
+        help="Microphone device index (int) or name substring (macOS only)",
+    )
 
     # Claude CLI
     parser.add_argument(
@@ -109,14 +120,46 @@ def main():
     args = parser.parse_args()
 
     # Validate macOS-only flags on Windows
-    if IS_WIN and (args.app or args.pid or args.list_apps or args.mic_only):
+    if IS_WIN and (
+        args.app
+        or args.pid
+        or args.list_apps
+        or args.mic_only
+        or args.list_mics
+        or args.mic
+    ):
         console.print(
-            "[red]--app, --pid, --list-apps, --mic-only are macOS only.[/red]"
+            "[red]--app, --pid, --list-apps, --mic-only, --list-mics, --mic"
+            " are macOS only.[/red]"
         )
         sys.exit(1)
 
+    # Resolve mic device (interactive selection if --mic not given)
+    mic_device = None
+    if IS_MAC and not args.file and not args.list_mics and not args.list_apps:
+        from meeting_transcriber.audio.mac import choose_mic
+
+        mic_device = choose_mic(args.mic)
+
     platform_name = "macOS" if IS_MAC else "Windows"
     console.rule(f"[bold]Meeting Transcriber – {platform_name}[/bold]")
+
+    # --list-mics: list microphone devices and exit (macOS only)
+    if args.list_mics:
+        from meeting_transcriber.audio.mac import list_mic_devices
+
+        mics = list_mic_devices()
+        if not mics:
+            console.print("[yellow]No input devices found.[/yellow]")
+            sys.exit(0)
+        console.print(f"\n[bold]Microphone devices ({len(mics)}):[/bold]\n")
+        for m in mics:
+            console.print(
+                f"  {m['index']:>3}. {m['name']}"
+                f"  [dim]({m['channels']}ch, {m['sample_rate']} Hz)[/dim]"
+            )
+        console.print()
+        sys.exit(0)
 
     # --list-apps: list apps and exit (macOS only)
     if args.list_apps:
@@ -159,7 +202,12 @@ def main():
                 tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                 audio_path = Path(tmp.name)
                 tmp.close()
-                record_audio(audio_path, app_pid=app_pid, mic_only=args.mic_only)
+                record_audio(
+                    audio_path,
+                    app_pid=app_pid,
+                    mic_only=args.mic_only,
+                    mic_device=mic_device,
+                )
             else:
                 from meeting_transcriber.audio.windows import record_audio
 
