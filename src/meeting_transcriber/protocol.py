@@ -50,12 +50,12 @@ def generate_protocol_cli(
             open(out_file, "w", encoding="utf-8") as fout,
         ):
             subprocess.run(
-                    f"{claude_bin} --print",
-                    shell=True,
-                    stdin=fin,
-                    stdout=fout,
-                    timeout=300,
-                )
+                f"{claude_bin} --print",
+                shell=True,
+                stdin=fin,
+                stdout=fout,
+                timeout=300,
+            )
     except FileNotFoundError:
         console.print(
             f"[red]'{claude_bin}' CLI not found. Please install:"
