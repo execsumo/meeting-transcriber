@@ -64,6 +64,7 @@ python tests/test_e2e_app_audio.py
 ## Conventions
 
 - Use `ruff` for linting/formatting (config in pyproject.toml)
+- Always run `ruff check src/ tests/ && ruff format src/ tests/` before committing
 - All code and UI text in English
 - Protocol output generated in German (via Claude prompt)
 - Python 3.14 via homebrew
