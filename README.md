@@ -141,6 +141,8 @@ transcribe --list-apps
 | `--pid` | Process ID for app audio (macOS) |
 | `--list-apps` | List running apps and exit (macOS) |
 | `--mic-only` | Microphone only, no app audio (macOS) |
+| `--list-mics` | List available microphone devices and exit (macOS) |
+| `--mic` | Microphone device index or name substring (macOS) |
 | `--diarize` | Enable speaker diarization |
 | `--speakers` | Expected number of speakers |
 

@@ -14,6 +14,87 @@ from meeting_transcriber.config import TARGET_RATE
 console = Console()
 
 
+def list_mic_devices() -> list[dict]:
+    """List available microphone input devices."""
+    devices = sd.query_devices()
+    mics = []
+    for i, dev in enumerate(devices):
+        if dev["max_input_channels"] > 0:
+            mics.append(
+                {
+                    "index": i,
+                    "name": dev["name"],
+                    "channels": dev["max_input_channels"],
+                    "sample_rate": int(dev["default_samplerate"]),
+                }
+            )
+    return mics
+
+
+def choose_mic(mic_spec: str | None) -> int | None:
+    """Select a mic by index/name or show interactive selection.
+
+    Returns device index or None for system default.
+    """
+    mics = list_mic_devices()
+    if not mics:
+        console.print("[yellow]No input devices found.[/yellow]")
+        return None
+
+    if mic_spec is not None:
+        # Try as integer index
+        try:
+            idx = int(mic_spec)
+            dev = sd.query_devices(idx)
+            if dev["max_input_channels"] == 0:
+                console.print(f"[red]Device {idx} is not an input device.[/red]")
+                sys.exit(1)
+            console.print(f"[green]Mic selected:[/green] {dev['name']}")
+            return idx
+        except ValueError:
+            pass
+
+        # Name substring match
+        matches = [m for m in mics if mic_spec.lower() in m["name"].lower()]
+        if len(matches) == 1:
+            console.print(f"[green]Mic selected:[/green] {matches[0]['name']}")
+            return matches[0]["index"]
+        if len(matches) > 1:
+            console.print(f"[yellow]Multiple mics match '{mic_spec}':[/yellow]")
+            for i, m in enumerate(matches, 1):
+                console.print(
+                    f"  {i}. {m['name']}  [dim]({m['channels']}ch,"
+                    f" {m['sample_rate']} Hz)[/dim]"
+                )
+            choice = input("Choose number: ").strip()
+            try:
+                return matches[int(choice) - 1]["index"]
+            except (ValueError, IndexError):
+                console.print("[red]Invalid selection.[/red]")
+                sys.exit(1)
+        console.print(f"[red]No microphone matching '{mic_spec}' found.[/red]")
+        sys.exit(1)
+
+    # Interactive selection
+    default_idx = sd.default.device[0]
+    console.print("\n[bold]Microphone devices:[/bold]")
+    for i, m in enumerate(mics, 1):
+        marker = " [green](default)[/green]" if m["index"] == default_idx else ""
+        console.print(
+            f"  {i:>3}. {m['name']}"
+            f"  [dim]({m['channels']}ch, {m['sample_rate']} Hz)[/dim]"
+            f"{marker}"
+        )
+    choice = input("\nChoose number (or Enter for default): ").strip()
+    if not choice:
+        return None
+    try:
+        return mics[int(choice) - 1]["index"]
+    except (ValueError, IndexError):
+        console.print("[red]Invalid selection.[/red]")
+        sys.exit(1)
+
+
 def list_audio_apps() -> list[dict]:
     """List running GUI apps (macOS) via NSWorkspace."""
     try:
@@ -77,7 +158,10 @@ def choose_app(app_name: str | None) -> dict | None:
 
 
 def record_audio(
-    output_path: Path, app_pid: int | None = None, mic_only: bool = False
+    output_path: Path,
+    app_pid: int | None = None,
+    mic_only: bool = False,
+    mic_device: int | None = None,
 ) -> Path:
     """Record app audio (ProcTap) and/or microphone (sounddevice)."""
     frames_app: list[bytes] = []
@@ -129,9 +213,12 @@ def record_audio(
         dtype="float32",
         callback=mic_callback,
         blocksize=1024,
+        device=mic_device,
     )
     mic_stream.start()
-    console.print(f"[dim]Microphone active ({mic_rate} Hz, mono)[/dim]")
+    dev_idx = mic_device if mic_device is not None else sd.default.device[0]
+    mic_name = sd.query_devices(dev_idx)["name"]
+    console.print(f"[dim]Microphone active: {mic_name} ({mic_rate} Hz, mono)[/dim]")
 
     # ── Recording loop ───────────────────────────────────────────────────
     console.print(
