@@ -1,0 +1,84 @@
+import Foundation
+import UserNotifications
+
+/// Sends macOS notifications for meeting state transitions.
+final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotificationManager()
+
+    private var isSetUp = false
+
+    private override init() {
+        super.init()
+    }
+
+    /// Set up delegate and request permission. Must be called after the app bundle is loaded.
+    func setUp() {
+        guard !isSetUp else { return }
+        isSetUp = true
+
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error {
+                print("Notification permission error: \(error)")
+            }
+            if !granted {
+                print("Notification permission denied")
+            }
+        }
+    }
+
+    func notify(title: String, body: String) {
+        guard isSetUp else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil
+        )
+
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Handle state transitions and send appropriate notifications.
+    func handleTransition(
+        from oldState: TranscriberState?,
+        to newState: TranscriberState,
+        status: TranscriberStatus
+    ) {
+        switch newState {
+        case .recording:
+            let meetingTitle = status.meeting?.title ?? "Unknown"
+            let app = status.meeting?.app ?? ""
+            notify(
+                title: "Meeting Detected",
+                body: "Recording: \(meetingTitle) (\(app))"
+            )
+        case .protocolReady:
+            let meetingTitle = status.meeting?.title ?? "Meeting"
+            notify(
+                title: "Protocol Ready",
+                body: "Protocol for \"\(meetingTitle)\" is ready."
+            )
+        case .error:
+            if let error = status.error {
+                notify(title: "Transcriber Error", body: error)
+            }
+        default:
+            break
+        }
+    }
+
+    // Show notifications even when app is in foreground
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+}

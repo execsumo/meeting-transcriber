@@ -169,13 +169,11 @@ def prompt_speaker_names(
     db: dict[str, list[float]],
     db_path: Path = SPEAKERS_DB,
 ) -> dict[str, str]:
-    """Ask the user to name unrecognized speakers and save their embeddings."""
+    """Play audio samples and let user name or confirm all speakers."""
     updated = False
 
     for label, current_name in sorted(mapping.items()):
-        if current_name != label:
-            # Already recognized
-            continue
+        recognized = current_name != label
 
         duration = speaking_times.get(label, 0)
         minutes = int(duration // 60)
@@ -189,9 +187,15 @@ def prompt_speaker_names(
         except Exception as e:
             console.print(f"  [yellow]Could not play audio: {e}[/yellow]")
 
-        prompt = (
-            f"  {label} (spoke {time_str}) – name (p=replay, p15=15s, Enter=skip): "
-        )
+        if recognized:
+            prompt = (
+                f"  {label} (spoke {time_str}) → [bold]{current_name}[/bold]"
+                f" – Enter=accept, p=replay, or type new name: "
+            )
+        else:
+            prompt = (
+                f"  {label} (spoke {time_str}) – name (p=replay, p15=15s, Enter=skip): "
+            )
         name = input(prompt).strip()
         while name.lower().startswith("p") and not name[1:].isalpha():
             dur = 10.0
@@ -206,9 +210,12 @@ def prompt_speaker_names(
         if name:
             name = name.capitalize()
             mapping[label] = name
-            db[name] = embeddings[label].tolist()
-            updated = True
+            if label in embeddings:
+                db[name] = embeddings[label].tolist()
+                updated = True
             console.print(f"  [green]Saved:[/green] {name}")
+        elif recognized:
+            console.print(f"  [green]Confirmed:[/green] {current_name}")
 
     if updated:
         save_speaker_db(db, db_path)
@@ -281,6 +288,14 @@ def diarize(
 
     token = os.environ.get("HF_TOKEN")
 
+    import torch
+
+    # Use MPS (Apple Silicon GPU) if available, otherwise CPU
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
     with Progress(
         SpinnerColumn(), TextColumn("{task.description}"), transient=True
     ) as progress:
@@ -289,8 +304,11 @@ def diarize(
             "pyannote/speaker-diarization-3.1",
             token=token,
         )
+        pipeline.to(device)
 
-    console.print("[dim]Diarization model loaded. Analyzing speakers ...[/dim]")
+    console.print(
+        f"[dim]Diarization model loaded ({device}). Analyzing speakers ...[/dim]"
+    )
 
     # Pass num_speakers hint to pyannote if provided
     pipeline_params: dict = {}
@@ -368,14 +386,12 @@ def diarize(
         )
     mapping = match_speakers(embeddings, db)
 
-    # Ask for names of unrecognized speakers
+    # Let user confirm/name all speakers
     if interactive and embeddings:
-        unrecognized = [label for label, name in mapping.items() if label == name]
-        if unrecognized:
-            console.print("\n[bold]Unknown speakers:[/bold]")
-            mapping = prompt_speaker_names(
-                mapping, embeddings, speaking_times, turns, audio_path, db
-            )
+        console.print("\n[bold]Speaker identification:[/bold]")
+        mapping = prompt_speaker_names(
+            mapping, embeddings, speaking_times, turns, audio_path, db
+        )
 
     # Apply name mapping to turns
     named_turns = [(start, end, mapping.get(s, s) or s) for start, end, s in turns]

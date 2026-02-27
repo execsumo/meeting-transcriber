@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from meeting_transcriber import status
 from meeting_transcriber.config import (
     DEFAULT_END_GRACE_PERIOD,
     DEFAULT_OUTPUT_DIR,
@@ -57,15 +58,22 @@ class MeetingWatcher:
         )
         console.print("[dim]Press Ctrl+C to exit[/dim]\n")
 
+        status.enable()
+        apps = ", ".join(p.app_name for p in self.detector.patterns)
+        status.emit("watching", detail=f"Polling {apps}...")
+
         try:
             while True:
                 meeting = self.detector.check_once()
                 if meeting:
                     self._handle_meeting(meeting)
                     self.detector.reset()
+                    status.emit("watching", detail=f"Polling {apps}...")
                 time.sleep(self.poll_interval)
         except KeyboardInterrupt:
             console.print("\n[yellow]Watch mode stopped.[/yellow]")
+            status.emit("idle")
+            status.disable()
 
     def _handle_meeting(self, meeting: DetectedMeeting) -> None:
         """Record a meeting, wait for it to end, then run the pipeline."""
@@ -73,6 +81,18 @@ class MeetingWatcher:
             f"[bold green]Meeting detected: {meeting.window_title}[/bold green]"
         )
         console.print(f"  App: {meeting.pattern.app_name} (PID {meeting.window_pid})\n")
+
+        meeting_info = {
+            "app": meeting.pattern.app_name,
+            "title": meeting.window_title,
+            "pid": meeting.window_pid,
+        }
+        app_name = meeting.pattern.app_name
+        status.emit(
+            "recording",
+            detail=f"Recording from {app_name} (PID {meeting.window_pid})",
+            meeting=meeting_info,
+        )
 
         # Prepare recording
         stop_event = threading.Event()
@@ -98,6 +118,7 @@ class MeetingWatcher:
 
         if not audio_path.exists() or audio_path.stat().st_size == 0:
             console.print("[red]No audio recorded, skipping pipeline.[/red]")
+            status.emit("error", error="No audio recorded")
             return
 
         # Run pipeline
@@ -163,6 +184,18 @@ class MeetingWatcher:
                 title = title[: -len(suffix)]
                 break
 
+        meeting_info = {
+            "app": meeting.pattern.app_name,
+            "title": meeting.window_title,
+            "pid": meeting.window_pid,
+        }
+
+        status.emit(
+            "transcribing",
+            detail=f"Transcribing: {title}",
+            meeting=meeting_info,
+        )
+
         try:
             from meeting_transcriber.transcription.mac import transcribe
 
@@ -177,6 +210,11 @@ class MeetingWatcher:
                 f"[red]Transcription failed: {e}[/red]\n"
                 f"[dim]Audio file preserved: {audio_path}[/dim]"
             )
+            status.emit(
+                "error",
+                error=f"Transcription failed: {e}",
+                meeting=meeting_info,
+            )
             return
 
         from meeting_transcriber.protocol import (
@@ -188,18 +226,36 @@ class MeetingWatcher:
         txt_path = save_transcript(transcript, title, self.output_dir)
         console.print(f"[dim]Transcript saved: {txt_path}[/dim]")
 
+        status.emit(
+            "generating_protocol",
+            detail=f"Generating protocol: {title}",
+            meeting=meeting_info,
+        )
+
         try:
             diarized = "[SPEAKER_" in transcript
             protocol_md = generate_protocol_cli(
                 transcript, title=title, diarized=diarized, claude_bin=self.claude_bin
             )
-            out_path = save_protocol(protocol_md, title, self.output_dir)
+            full_md = protocol_md + "\n\n---\n\n## Full Transcript\n\n" + transcript
+            out_path = save_protocol(full_md, title, self.output_dir)
             console.print(f"\n[bold green]Protocol saved:[/bold green] {out_path}")
         except Exception as e:
             console.print(
                 f"[red]Protocol generation failed: {e}[/red]\n"
                 f"[dim]Transcript preserved: {txt_path}[/dim]"
             )
+            status.emit(
+                "error",
+                error=f"Protocol generation failed: {e}",
+                meeting=meeting_info,
+            )
             return
 
+        status.emit(
+            "protocol_ready",
+            detail=f"Protocol ready: {title}",
+            meeting=meeting_info,
+            protocol_path=out_path,
+        )
         console.print("\n[bold]Pipeline complete.[/bold] Resuming watch mode...\n")

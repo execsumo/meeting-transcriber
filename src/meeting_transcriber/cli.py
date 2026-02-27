@@ -332,8 +332,9 @@ def main():
         transcript, title=args.title, diarized=diarized, claude_bin=args.claude
     )
 
-    # 5. Save protocol
-    out_path = save_protocol(protocol_md, args.title, args.output_dir)
+    # 5. Append full transcript and save protocol
+    full_md = protocol_md + "\n\n---\n\n## Full Transcript\n\n" + transcript
+    out_path = save_protocol(full_md, args.title, args.output_dir)
     console.print(f"\n[bold green]Protocol saved:[/bold green] {out_path}")
     console.print(Markdown(protocol_md))
 

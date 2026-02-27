@@ -7,6 +7,10 @@ DEFAULT_WHISPER_MODEL_WIN = "large"
 DEFAULT_OUTPUT_DIR = Path("./protocols")
 TARGET_RATE = 16000
 
+# Status file for menu bar app communication
+STATUS_DIR = Path.home() / ".meeting-transcriber"
+STATUS_FILE = STATUS_DIR / "status.json"
+
 # Watch mode defaults
 DEFAULT_POLL_INTERVAL = 3.0
 DEFAULT_END_GRACE_PERIOD = 15.0
@@ -53,10 +57,7 @@ Use exactly this structure:
 - [Question 1]
 - [Question 2]
 
----
-
-## Full Transcript
-[Insert the full transcript here]
+Do NOT include the full transcript in the output – it will be appended automatically.
 
 ---
 Transcript:
