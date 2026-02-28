@@ -11,6 +11,12 @@ TARGET_RATE = 16000
 STATUS_DIR = Path.home() / ".meeting-transcriber"
 STATUS_FILE = STATUS_DIR / "status.json"
 
+# Speaker naming IPC (Python ↔ Swift menu bar app)
+SPEAKER_REQUEST_FILE = STATUS_DIR / "speaker_request.json"
+SPEAKER_RESPONSE_FILE = STATUS_DIR / "speaker_response.json"
+SPEAKER_SAMPLES_DIR = STATUS_DIR / "speaker_samples"
+SPEAKER_NAMING_TIMEOUT = 300  # 5 minutes
+
 # Watch mode defaults
 DEFAULT_POLL_INTERVAL = 3.0
 DEFAULT_END_GRACE_PERIOD = 15.0

@@ -218,6 +218,7 @@ class MeetingWatcher:
                 model=self.whisper_model,
                 diarize_enabled=self.diarize,
                 num_speakers=self.num_speakers,
+                meeting_title=title,
             )
         except Exception as e:
             console.print(
