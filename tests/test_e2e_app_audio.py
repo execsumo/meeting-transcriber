@@ -253,10 +253,15 @@ class TestE2EAppAudio:
         """Step 4+5: Whisper transcription matches expected keywords."""
         from pywhispercpp.model import Model
 
+        from meeting_transcriber.transcription.mac import _ensure_16khz
+
         chunks = convert_to_proctap_format(speech_wav)
         wav_path = mix_pipeline(chunks)
 
         try:
+            # Resample to 16kHz as the real pipeline does
+            whisper_path = _ensure_16khz(wav_path)
+
             n_threads = min(os.cpu_count() or 4, 8)
             model = Model(
                 "base",
@@ -264,7 +269,7 @@ class TestE2EAppAudio:
                 print_realtime=False,
                 print_progress=False,
             )
-            segments = model.transcribe(str(wav_path), language=lang)
+            segments = model.transcribe(str(whisper_path), language=lang)
             transcript = " ".join(seg.text for seg in segments).strip()
 
             keywords = KEYWORDS[lang]
@@ -276,6 +281,9 @@ class TestE2EAppAudio:
             )
         finally:
             wav_path.unlink(missing_ok=True)
+            # Clean up resampled file if created
+            if whisper_path != wav_path:
+                whisper_path.unlink(missing_ok=True)
 
     def test_proctap_live_capture(self, speech_wav):
         """Step 6: Real ProcTap capture receives audio data."""
