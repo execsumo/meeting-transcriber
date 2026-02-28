@@ -31,12 +31,14 @@ struct SpeakerNamingView: View {
                     onComplete([:])
                 }
                 .keyboardShortcut(.escape)
+                .accessibilityIdentifier("skip-button")
 
                 Button("Confirm") {
                     confirm()
                 }
                 .keyboardShortcut(.return)
                 .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("confirm-button")
             }
             .padding(.bottom, 8)
         }
@@ -78,6 +80,7 @@ struct SpeakerNamingView: View {
 
                     TextField("Name", text: $names[index])
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("speaker-name-\(speaker.label)")
                 }
             }
             .padding(4)
