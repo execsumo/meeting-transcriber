@@ -83,7 +83,7 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
 ## Critical Notes
 
 - ProcTap Swift binary must be built manually after pip install
-- Screen Recording permission required for app audio capture (System Settings → Privacy & Security)
+- Screen Recording permission required **twice**: for Terminal (CLI use) AND for MeetingTranscriber.app (menu bar app) — without it, `CGWindowListCopyWindowInfo` returns no window titles and meetings are not detected
 - ScreenCaptureKit only sees apps with windows + bundle ID
 - pyannote diarization requires HuggingFace token + license acceptance for 3 models:
   - pyannote/speaker-diarization-3.1
