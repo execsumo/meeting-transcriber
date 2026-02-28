@@ -5,6 +5,16 @@ final class PythonProcess {
     private var process: Process?
     let projectRoot: String
 
+    /// Posted when the Python process terminates unexpectedly.
+    static let unexpectedTermination = Notification.Name("PythonProcessUnexpectedTermination")
+
+    private static var logFileURL: URL {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".meeting-transcriber")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("transcriber.log")
+    }
+
     var isRunning: Bool { process?.isRunning == true }
 
     init() {
@@ -39,9 +49,38 @@ final class PythonProcess {
         env["PATH"] = "\(venvBin):\(env["PATH"] ?? "/usr/bin")"
         proc.environment = env
 
-        // Pipe stdout/stderr so they don't clutter the app's console
+        // Pipe stdout to /dev/null, stderr to log file for debugging
         proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
+        if let logHandle = try? FileHandle(forWritingTo: Self.logFileURL) {
+            logHandle.seekToEndOfFile()
+            proc.standardError = logHandle
+        } else {
+            // Create the file and retry
+            FileManager.default.createFile(atPath: Self.logFileURL.path, contents: nil)
+            if let logHandle = try? FileHandle(forWritingTo: Self.logFileURL) {
+                proc.standardError = logHandle
+            } else {
+                proc.standardError = FileHandle.nullDevice
+            }
+        }
+
+        // Detect unexpected termination (crash, signal)
+        proc.terminationHandler = { [weak self] terminatedProc in
+            let status = terminatedProc.terminationStatus
+            let reason = terminatedProc.terminationReason
+            if reason == .uncaughtSignal || (status != 0 && status != 2) {
+                // status 2 = SIGINT (normal shutdown via stop())
+                print("Python process terminated unexpectedly: status=\(status), reason=\(reason)")
+                NotificationCenter.default.post(
+                    name: PythonProcess.unexpectedTermination,
+                    object: nil,
+                    userInfo: ["status": status]
+                )
+            }
+            DispatchQueue.main.async {
+                self?.process = nil
+            }
+        }
 
         do {
             try proc.run()
