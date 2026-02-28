@@ -68,20 +68,34 @@ def generate_protocol_cli(
     writer = threading.Thread(target=_feed_stdin, daemon=True)
     writer.start()
 
+    # Drain stderr in a thread to prevent pipe buffer from filling → deadlock
+    stderr_lines: list[str] = []
+
+    def _drain_stderr():
+        for raw in proc.stderr:
+            stderr_lines.append(raw.decode("utf-8", errors="replace"))
+
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    stderr_thread.start()
+
     try:
         text = _read_stream(proc)
     except TimeoutError:
         proc.kill()
+        proc.wait()
         console.print("[red]Timeout – Claude took too long (>10 min).[/red]")
         sys.exit(1)
+    finally:
+        writer.join(timeout=5)
+        stderr_thread.join(timeout=5)
 
-    writer.join(timeout=5)
+    proc.wait(timeout=10)
 
-    if proc.returncode and proc.returncode != 0:
-        stderr = proc.stderr.read().decode() if proc.stderr else ""
+    if proc.returncode != 0:
+        stderr_text = "".join(stderr_lines).strip()
         console.print(f"[red]Claude CLI exited with code {proc.returncode}[/red]")
-        if stderr.strip():
-            console.print(f"[dim]{stderr.strip()}[/dim]")
+        if stderr_text:
+            console.print(f"[dim]{stderr_text}[/dim]")
         sys.exit(1)
 
     if not text.strip():
