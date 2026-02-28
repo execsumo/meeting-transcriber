@@ -57,6 +57,7 @@ def transcribe(
     language: str | None = None,
     diarize_enabled: bool = False,
     num_speakers: int | None = None,
+    meeting_title: str = "Meeting",
 ) -> str:
     """Transcribe an audio file with pywhispercpp (whisper.cpp)."""
     from pywhispercpp.model import Model
@@ -103,7 +104,7 @@ def transcribe(
         for seg in segments
     ]
 
-    turns = diarize(audio_path, num_speakers=num_speakers)
+    turns = diarize(audio_path, num_speakers=num_speakers, meeting_title=meeting_title)
     ts_segments = assign_speakers(ts_segments, turns)
     text = format_diarized_transcript(ts_segments)
 

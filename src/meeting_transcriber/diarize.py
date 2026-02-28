@@ -9,7 +9,10 @@ Features:
 
 import fcntl
 import json
+import logging
 import os
+import shutil
+import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +20,8 @@ from pathlib import Path
 import numpy as np
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
+
+log = logging.getLogger(__name__)
 
 console = Console()
 
@@ -240,6 +245,169 @@ def prompt_speaker_names(
     return mapping
 
 
+# ── Status helpers (avoid circular import) ───────────────────────────────────
+
+
+def _status_enabled() -> bool:
+    """Check if the status emitter is active (menu bar app mode)."""
+    from meeting_transcriber import status
+
+    return status._enabled
+
+
+def _emit_status(state: str, **kwargs) -> None:
+    """Emit a status update if the status emitter is active."""
+    from meeting_transcriber import status
+
+    status.emit(state, **kwargs)
+
+
+# ── Speaker Naming IPC (menu bar app) ────────────────────────────────────────
+
+
+def extract_speaker_samples(
+    audio_path: Path,
+    turns: list[tuple[float, float, str]],
+    output_dir: Path,
+    max_duration: float = 10.0,
+) -> dict[str, str]:
+    """Extract a WAV clip per speaker (longest turn, max 10s, 16kHz mono).
+
+    Returns {speaker_label: filename}.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    speaker_labels = sorted(set(t[2] for t in turns))
+    samples: dict[str, str] = {}
+
+    with wave.open(str(audio_path), "rb") as wf:
+        sr = wf.getframerate()
+        n_channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+
+        for label in speaker_labels:
+            speaker_turns = [(s, e) for s, e, spk in turns if spk == label]
+            if not speaker_turns:
+                continue
+
+            # Pick the longest turn
+            speaker_turns.sort(key=lambda t: t[1] - t[0], reverse=True)
+            start, end = speaker_turns[0]
+            end = min(end, start + max_duration)
+
+            start_frame = int(start * sr)
+            end_frame = int(end * sr)
+            wf.setpos(start_frame)
+            frames = wf.readframes(end_frame - start_frame)
+
+            dtype = {1: np.int8, 2: np.int16, 4: np.int32}.get(sampwidth, np.int16)
+            audio = np.frombuffer(frames, dtype=dtype)
+            if n_channels > 1:
+                audio = audio.reshape(-1, n_channels).mean(axis=1).astype(dtype)
+
+            filename = f"{label}.wav"
+            out_path = output_dir / filename
+            with wave.open(str(out_path), "wb") as out_wf:
+                out_wf.setnchannels(1)
+                out_wf.setsampwidth(sampwidth)
+                out_wf.setframerate(sr)
+                out_wf.writeframes(audio.tobytes())
+
+            samples[label] = filename
+
+    return samples
+
+
+def write_speaker_request(
+    mapping: dict[str, str],
+    embeddings: dict[str, np.ndarray],
+    speaking_times: dict[str, float],
+    audio_path: Path,
+    turns: list[tuple[float, float, str]],
+    meeting_title: str,
+) -> None:
+    """Extract audio samples and write speaker_request.json for the menu bar app."""
+    from meeting_transcriber.config import SPEAKER_REQUEST_FILE, SPEAKER_SAMPLES_DIR
+
+    samples = extract_speaker_samples(audio_path, turns, SPEAKER_SAMPLES_DIR)
+
+    speakers = []
+    for label in sorted(mapping.keys()):
+        auto_name = mapping[label] if mapping[label] != label else None
+        # Compute confidence from embeddings (use best match score)
+        confidence = 0.0
+        if auto_name and label in embeddings:
+            db = load_speaker_db()
+            if auto_name in db:
+                confidence = cosine_similarity(
+                    embeddings[label], np.array(db[auto_name])
+                )
+
+        speakers.append(
+            {
+                "label": label,
+                "auto_name": auto_name,
+                "confidence": round(confidence, 2),
+                "speaking_time_seconds": round(speaking_times.get(label, 0), 1),
+                "sample_file": samples.get(label, ""),
+            }
+        )
+
+    data = {
+        "version": 1,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "meeting_title": meeting_title,
+        "audio_samples_dir": str(SPEAKER_SAMPLES_DIR),
+        "speakers": speakers,
+    }
+
+    SPEAKER_REQUEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = SPEAKER_REQUEST_FILE.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, SPEAKER_REQUEST_FILE)
+    log.info("Wrote speaker request: %s", SPEAKER_REQUEST_FILE)
+
+
+def poll_speaker_response(timeout: int = 300) -> dict[str, str] | None:
+    """Poll for speaker_response.json (written by the Swift app).
+
+    Returns speaker mapping {label: name} or None on timeout.
+    """
+    from meeting_transcriber.config import SPEAKER_RESPONSE_FILE
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if SPEAKER_RESPONSE_FILE.exists():
+            try:
+                with open(SPEAKER_RESPONSE_FILE, encoding="utf-8") as f:
+                    data = json.load(f)
+                return data.get("speakers", {})
+            except (json.JSONDecodeError, OSError) as e:
+                log.warning("Failed to read speaker response: %s", e)
+                return None
+        time.sleep(2)
+
+    log.info("Speaker naming timed out after %ds", timeout)
+    return None
+
+
+def cleanup_speaker_ipc() -> None:
+    """Remove IPC files and speaker samples directory."""
+    from meeting_transcriber.config import (
+        SPEAKER_REQUEST_FILE,
+        SPEAKER_RESPONSE_FILE,
+        SPEAKER_SAMPLES_DIR,
+    )
+
+    for f in (SPEAKER_REQUEST_FILE, SPEAKER_RESPONSE_FILE):
+        try:
+            f.unlink(missing_ok=True)
+        except OSError:
+            pass
+    if SPEAKER_SAMPLES_DIR.exists():
+        shutil.rmtree(SPEAKER_SAMPLES_DIR, ignore_errors=True)
+
+
 # ── Diarization ──────────────────────────────────────────────────────────────
 
 
@@ -287,6 +455,7 @@ def diarize(
     audio_path: Path,
     num_speakers: int | None = None,
     interactive: bool = True,
+    meeting_title: str = "Meeting",
 ) -> list[tuple[float, float, str]]:
     """Run pyannote speaker diarization with speaker recognition.
 
@@ -294,6 +463,7 @@ def diarize(
         audio_path: Path to audio file.
         num_speakers: Expected number of speakers (helps accuracy).
         interactive: Whether to prompt for unknown speaker names.
+        meeting_title: Title for speaker naming IPC request.
 
     Returns list of (start_sec, end_sec, speaker_name) tuples.
     """
@@ -401,6 +571,7 @@ def diarize(
                 audio_path,
                 num_speakers=corrected,
                 interactive=interactive,
+                meeting_title=meeting_title,
             )
 
     # Match against saved speaker profiles
@@ -417,6 +588,35 @@ def diarize(
         mapping = prompt_speaker_names(
             mapping, embeddings, speaking_times, turns, audio_path, db
         )
+    elif not interactive and _status_enabled() and embeddings:
+        # App-flow: file-based IPC for speaker naming via menu bar app
+        from meeting_transcriber.config import SPEAKER_NAMING_TIMEOUT
+
+        write_speaker_request(
+            mapping, embeddings, speaking_times, audio_path, turns, meeting_title
+        )
+        _emit_status(
+            "waiting_for_speaker_names",
+            detail=f"{len(speaker_labels)} speakers detected",
+        )
+        console.print(
+            f"[dim]Waiting for speaker names via app "
+            f"(timeout {SPEAKER_NAMING_TIMEOUT}s)...[/dim]"
+        )
+        response = poll_speaker_response(SPEAKER_NAMING_TIMEOUT)
+        if response:
+            for label, name in response.items():
+                if name:
+                    mapping[label] = name.capitalize()
+                    if label in embeddings:
+                        db[name.capitalize()] = embeddings[label].tolist()
+            save_speaker_db(db)
+            console.print("[green]Speaker names received from app.[/green]")
+        else:
+            console.print(
+                "[yellow]No speaker names received, using auto-detected.[/yellow]"
+            )
+        cleanup_speaker_ipc()
 
     # Apply name mapping to turns
     named_turns = [(start, end, mapping.get(s, s) or s) for start, end, s in turns]
