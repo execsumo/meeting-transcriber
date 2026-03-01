@@ -84,9 +84,14 @@ class MicCaptureHandler {
         try inputNode.setVoiceProcessingEnabled(true)
         fputs("Mic: VoiceProcessingIO enabled (AEC active)\n", stderr)
 
-        // Query the format from the input node
-        let tapFormat = inputNode.outputFormat(forBus: 0)
-        fputs("Mic format: \(tapFormat.sampleRate) Hz, \(tapFormat.channelCount)ch\n", stderr)
+        // Query the hardware format, then create a mono tap format.
+        // VoiceProcessingIO may report multi-channel (e.g. 9ch) but we
+        // only need mono for the mic recording.
+        let hwFormat = inputNode.outputFormat(forBus: 0)
+        fputs("Mic hardware format: \(hwFormat.sampleRate) Hz, \(hwFormat.channelCount)ch\n", stderr)
+
+        let tapFormat = AVAudioFormat(standardFormatWithSampleRate: hwFormat.sampleRate, channels: 1)!
+        fputs("Mic tap format: \(tapFormat.sampleRate) Hz, \(tapFormat.channelCount)ch\n", stderr)
 
         // Create output WAV file — 16-bit PCM mono at the input node's sample rate
         let url = URL(fileURLWithPath: outputPath)
@@ -101,7 +106,8 @@ class MicCaptureHandler {
         ]
         outputFile = try AVAudioFile(forWriting: url, settings: wavSettings)
 
-        // Install tap to capture audio buffers
+        // Install tap with explicit mono format — AVAudioEngine will
+        // downmix the multi-channel input to mono automatically.
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, when in
             guard let self = self else { return }
             if self.firstFrameTime == 0 {
