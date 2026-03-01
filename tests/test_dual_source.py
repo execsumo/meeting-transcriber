@@ -1,11 +1,14 @@
 """Tests for dual-source transcription (app + mic separate tracks)."""
 
+import wave
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+
 from meeting_transcriber.audio.mac import RecordingResult
 from meeting_transcriber.diarize import TimestampedSegment
-from meeting_transcriber.transcription.mac import _merge_segments
+from meeting_transcriber.transcription.mac import _merge_segments, _suppress_echo
 
 
 class TestRecordingResult:
@@ -174,3 +177,92 @@ class TestDualSourceDispatch:
             )
 
         assert "app only" in result
+
+
+def _write_wav(path: Path, samples: np.ndarray, rate: int = 16000) -> None:
+    """Write float32 mono samples to a 16-bit WAV file."""
+    audio_int16 = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(audio_int16.tobytes())
+
+
+class TestSuppressEcho:
+    def test_attenuates_active_regions(self, tmp_path):
+        """Echo regions (where app is loud) are attenuated in mic output."""
+        rate = 16000
+        duration = 1.0  # 1 second
+        n = int(rate * duration)
+        t = np.linspace(0, duration, n, dtype=np.float32)
+
+        # App: sine tone in first 0.5s, silence in second 0.5s
+        app = np.zeros(n, dtype=np.float32)
+        app[: n // 2] = 0.5 * np.sin(2 * np.pi * 440 * t[: n // 2])
+
+        # Mic: sine tone in both halves (echo in first, real speech in second)
+        mic = 0.3 * np.sin(2 * np.pi * 440 * t)
+
+        app_path = tmp_path / "app.wav"
+        mic_path = tmp_path / "mic.wav"
+        _write_wav(app_path, app, rate)
+        _write_wav(mic_path, mic, rate)
+
+        clean_path = _suppress_echo(app_path, mic_path)
+
+        # Read back the cleaned mic
+        with wave.open(str(clean_path), "rb") as wf:
+            raw = wf.readframes(wf.getnframes())
+        clean = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+        # Echo region (first half) should be heavily attenuated
+        echo_rms = np.sqrt(np.mean(clean[: n // 2] ** 2))
+        # Speech region (second half, minus margin) should be preserved
+        margin = int(0.25 * rate)  # skip margin area
+        speech_rms = np.sqrt(np.mean(clean[n // 2 + margin :] ** 2))
+
+        assert echo_rms < 0.01, f"Echo region not attenuated enough: RMS={echo_rms}"
+        assert speech_rms > 0.1, f"Speech region too quiet: RMS={speech_rms}"
+
+    def test_silent_app_preserves_mic(self, tmp_path):
+        """When app track is silent, mic track is unchanged."""
+        rate = 16000
+        n = int(rate * 0.5)
+        t = np.linspace(0, 0.5, n, dtype=np.float32)
+
+        app = np.zeros(n, dtype=np.float32)
+        mic = 0.3 * np.sin(2 * np.pi * 440 * t)
+
+        app_path = tmp_path / "app.wav"
+        mic_path = tmp_path / "mic.wav"
+        _write_wav(app_path, app, rate)
+        _write_wav(mic_path, mic, rate)
+
+        clean_path = _suppress_echo(app_path, mic_path)
+
+        with wave.open(str(clean_path), "rb") as wf:
+            raw = wf.readframes(wf.getnframes())
+        clean = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+        original_rms = np.sqrt(np.mean(mic**2))
+        clean_rms = np.sqrt(np.mean(clean**2))
+
+        # Should be essentially unchanged (small rounding from int16 conversion)
+        assert abs(original_rms - clean_rms) < 0.01
+
+    def test_returns_clean_path(self, tmp_path):
+        """Output file has _clean suffix."""
+        rate = 16000
+        n = rate  # 1 second
+
+        app_path = tmp_path / "app.wav"
+        mic_path = tmp_path / "mic.wav"
+        _write_wav(app_path, np.zeros(n, dtype=np.float32), rate)
+        _write_wav(mic_path, np.zeros(n, dtype=np.float32), rate)
+
+        result = _suppress_echo(app_path, mic_path)
+
+        assert result.stem == "mic_clean"
+        assert result.suffix == ".wav"
+        assert result.exists()

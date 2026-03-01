@@ -1,5 +1,6 @@
 """macOS transcription via pywhispercpp (whisper.cpp)."""
 
+import logging
 import os
 import wave
 from pathlib import Path
@@ -9,6 +10,8 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from meeting_transcriber.config import DEFAULT_WHISPER_MODEL_MAC, TARGET_RATE
+
+log = logging.getLogger(__name__)
 
 console = Console()
 
@@ -48,6 +51,113 @@ def _ensure_16khz(audio_path: Path) -> Path:
         wf.writeframes(audio_int16.tobytes())
 
     console.print(f"[dim]Resampled {rate}→{TARGET_RATE} Hz: {out_path}[/dim]")
+    return out_path
+
+
+def _suppress_echo(
+    app_path: Path,
+    mic_path: Path,
+    mic_delay: float = 0.0,
+    threshold: float = 0.01,
+) -> Path:
+    """Suppress echo in mic track using app audio as reference.
+
+    Where the app track has energy above *threshold*, the mic track is
+    attenuated by -40 dB (factor 0.01) instead of being zeroed — this
+    avoids Whisper hallucinations on silence.  Asymmetric margin: 2
+    windows (~40 ms) before and 10 windows (~200 ms) after each active
+    region to catch onset/reverb tails.
+    """
+    rate = TARGET_RATE  # both files are 16 kHz at this point
+    window = int(0.020 * rate)  # 20 ms analysis window
+
+    # --- load both WAVs as float32 mono ---
+    def _load_wav(path: Path) -> np.ndarray:
+        with wave.open(str(path), "rb") as wf:
+            sw = wf.getsampwidth()
+            ch = wf.getnchannels()
+            raw = wf.readframes(wf.getnframes())
+        if sw == 2:
+            samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        else:
+            samples = np.frombuffer(raw, dtype=np.float32)
+        if ch > 1:
+            samples = samples.reshape(-1, ch).mean(axis=1)
+        return samples
+
+    app = _load_wav(app_path)
+    mic = _load_wav(mic_path)
+
+    # --- align app to mic timeline ---
+    delay_samples = int(mic_delay * rate)
+    if delay_samples > 0:
+        # mic started later → prepend silence to app so it lines up
+        app = np.concatenate([np.zeros(delay_samples, dtype=np.float32), app])
+    elif delay_samples < 0:
+        # app started later → trim beginning of app
+        app = app[abs(delay_samples) :]
+
+    # pad / truncate to same length
+    length = len(mic)
+    if len(app) < length:
+        app = np.concatenate([app, np.zeros(length - len(app), dtype=np.float32)])
+    else:
+        app = app[:length]
+
+    # --- RMS energy per window ---
+    n_windows = length // window
+    app_rms = np.array(
+        [
+            np.sqrt(np.mean(app[i * window : (i + 1) * window] ** 2))
+            for i in range(n_windows)
+        ]
+    )
+
+    # --- build gate mask (True = suppress) ---
+    gate = app_rms > threshold
+
+    # expand margins: 2 windows before, 10 windows after
+    margin_before = 2
+    margin_after = 10
+    expanded = np.copy(gate)
+    for i in range(n_windows):
+        if gate[i]:
+            lo = max(0, i - margin_before)
+            hi = min(n_windows, i + margin_after + 1)
+            expanded[lo:hi] = True
+
+    # --- apply soft gate to mic ---
+    attenuation = 0.01  # -40 dB
+    suppressed_windows = 0
+    for i in range(n_windows):
+        if expanded[i]:
+            start = i * window
+            end = start + window
+            mic[start:end] *= attenuation
+            suppressed_windows += 1
+
+    suppressed_sec = suppressed_windows * 0.020
+    total_sec = n_windows * 0.020
+    log.info(
+        "Echo suppression: %.1fs / %.1fs suppressed (%.0f%%)",
+        suppressed_sec,
+        total_sec,
+        100 * suppressed_sec / total_sec if total_sec > 0 else 0,
+    )
+    console.print(
+        f"[dim]Echo suppression: {suppressed_sec:.1f}s / {total_sec:.1f}s "
+        f"suppressed ({100 * suppressed_sec / total_sec:.0f}%)[/dim]"
+    )
+
+    # --- save cleaned mic ---
+    out_path = mic_path.with_stem(mic_path.stem + "_clean")
+    audio_int16 = (np.clip(mic, -1.0, 1.0) * 32767).astype(np.int16)
+    with wave.open(str(out_path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(audio_int16.tobytes())
+
     return out_path
 
 
@@ -124,16 +234,20 @@ def _transcribe_dual_source(
         format_diarized_transcript,
     )
 
-    # 1. Transcribe both tracks
+    # 1. Suppress echo in mic track using app audio as reference
+    console.print("[dim]Suppressing echo in mic track ...[/dim]")
+    mic_clean = _suppress_echo(app_audio, mic_audio, mic_delay=mic_delay)
+
+    # 2. Transcribe both tracks
     console.print("[dim]Transcribing app audio ...[/dim]")
     app_segments = _transcribe_segments(whisper_model, app_audio, language)
     console.print(f"[dim]App: {len(app_segments)} segments[/dim]")
 
     console.print("[dim]Transcribing mic audio ...[/dim]")
-    mic_segments = _transcribe_segments(whisper_model, mic_audio, language)
+    mic_segments = _transcribe_segments(whisper_model, mic_clean, language)
     console.print(f"[dim]Mic: {len(mic_segments)} segments[/dim]")
 
-    # 2. Align tracks using stream start-time delta
+    # 3. Align tracks using stream start-time delta
     #    mic_delay > 0: mic started later → shift mic timestamps forward
     #    mic_delay < 0: app started later → shift app timestamps forward
     if mic_delay >= 0:
@@ -146,7 +260,7 @@ def _transcribe_dual_source(
             seg.end += abs(mic_delay)
     console.print(f"[dim]Track alignment: mic_delay={mic_delay:+.3f}s[/dim]")
 
-    # 3. Label app segments
+    # 4. Label app segments
     if diarize_enabled:
         try:
             turns = diarize(
@@ -164,7 +278,7 @@ def _transcribe_dual_source(
         for seg in app_segments:
             seg.speaker = "Remote"
 
-    # 4. Label mic segments
+    # 5. Label mic segments
     if mic_label:
         # Solo mode: single person at the mic
         for seg in mic_segments:
@@ -188,7 +302,7 @@ def _transcribe_dual_source(
             for seg in mic_segments:
                 seg.speaker = "Local"
 
-    # 5. Merge and format
+    # 6. Merge and format
     merged = _merge_segments(app_segments, mic_segments)
     text = format_diarized_transcript(merged)
 
