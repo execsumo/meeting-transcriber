@@ -117,10 +117,23 @@ final class StatusMonitor {
               let decoded = try? JSONDecoder().decode(TranscriberStatus.self, from: data)
         else { return }
 
+        // Ignore stale status from a dead process
+        if let pid = decoded.pid, !Self.processIsAlive(pid) {
+            DispatchQueue.main.async { [weak self] in
+                self?.previousState = nil
+                self?.status = nil
+            }
+            return
+        }
+
         let oldState = status?.state
         DispatchQueue.main.async { [weak self] in
             self?.previousState = oldState
             self?.status = decoded
         }
+    }
+
+    private static func processIsAlive(_ pid: Int) -> Bool {
+        kill(Int32(pid), 0) == 0
     }
 }
