@@ -1,6 +1,7 @@
 """Unified CLI entry point for Meeting Transcriber."""
 
 import argparse
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -124,6 +125,15 @@ def main():
         default=None,
         help="Expected number of speakers (improves diarization accuracy)",
     )
+    parser.add_argument(
+        "--mic-name",
+        type=str,
+        default="Me",
+        help=(
+            "Label for mic speaker in dual-source mode (default: 'Me'). "
+            "Use '' to diarize the mic track too (multi-person room)"
+        ),
+    )
 
     # Watch mode
     parser.add_argument(
@@ -211,6 +221,7 @@ def main():
             no_mic=args.no_mic,
             mic_device=mic_device,
             claude_bin=args.claude,
+            mic_label=args.mic_name,
         )
         watcher.run()
         sys.exit(0)
@@ -263,6 +274,7 @@ def main():
         sys.exit(0)
 
     # 1. Determine audio source
+    recording = None  # RecordingResult from live recording (if any)
     if args.file and args.file.suffix.lower() == ".txt":
         console.print(f"[blue]Transcript file detected:[/blue] {args.file}")
         transcript = args.file.read_text(encoding="utf-8").strip()
@@ -289,7 +301,7 @@ def main():
                 tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                 audio_path = Path(tmp.name)
                 tmp.close()
-                record_audio(
+                recording = record_audio(
                     audio_path,
                     app_pid=app_pid,
                     mic_only=args.mic_only,
@@ -308,11 +320,17 @@ def main():
         if IS_MAC:
             from meeting_transcriber.transcription.mac import transcribe
 
+            extra_kwargs = {}
+            if recording is not None:
+                extra_kwargs["app_audio"] = recording.app
+                extra_kwargs["mic_audio"] = recording.mic
+                extra_kwargs["mic_label"] = args.mic_name
             transcript = transcribe(
                 audio_path,
                 model=args.model,
                 diarize_enabled=args.diarize,
                 num_speakers=args.speakers,
+                **extra_kwargs,
             )
         else:
             from meeting_transcriber.transcription.windows import transcribe
@@ -327,7 +345,7 @@ def main():
         console.print(f"[dim]Transcript saved: {txt_path}[/dim]")
 
     # 4. Protocol via Claude CLI
-    diarized = "[SPEAKER_" in transcript
+    diarized = bool(re.search(r"\[\w[\w\s]*\]", transcript))
     protocol_md = generate_protocol_cli(
         transcript, title=args.title, diarized=diarized, claude_bin=args.claude
     )

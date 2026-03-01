@@ -1,8 +1,10 @@
 """Unit tests for watch-mode watcher (max duration, thread safety)."""
 
 import time
+from pathlib import Path
 from unittest.mock import Mock
 
+from meeting_transcriber.audio.mac import RecordingResult
 from meeting_transcriber.config import MAX_RECORDING_SECONDS
 from meeting_transcriber.watch.watcher import MeetingWatcher
 
@@ -92,6 +94,7 @@ class TestHandleMeetingThreadSafety:
 
         def _fake_record(audio_path, app_pid, stop_event):
             stop_events.append(stop_event)
+            watcher._last_recording = RecordingResult(mix=Path(audio_path))
             stop_event.wait(timeout=5)
 
         watcher._record = _fake_record

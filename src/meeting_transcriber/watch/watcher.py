@@ -1,6 +1,7 @@
 """Watch-mode orchestrator: detect meetings, record, run pipeline."""
 
 import logging
+import re
 import tempfile
 import threading
 import time
@@ -38,6 +39,7 @@ class MeetingWatcher:
         no_mic: bool = False,
         mic_device: int | None = None,
         claude_bin: str = "claude",
+        mic_label: str = "Me",
     ):
         self.detector = MeetingDetector(patterns, confirmation_count=confirmation_count)
         self.poll_interval = poll_interval
@@ -49,6 +51,8 @@ class MeetingWatcher:
         self.no_mic = no_mic
         self.mic_device = mic_device
         self.claude_bin = claude_bin
+        self.mic_label = mic_label
+        self._last_recording = None  # RecordingResult from most recent recording
 
     def run(self) -> None:
         """Main loop: poll for meetings, record, run pipeline. Blocks until Ctrl+C."""
@@ -137,7 +141,7 @@ class MeetingWatcher:
 
         # Run pipeline
         console.rule("[bold]Running transcription pipeline[/bold]")
-        self._run_pipeline(audio_path, meeting)
+        self._run_pipeline(audio_path, meeting, recording=self._last_recording)
 
     def _record(
         self,
@@ -149,7 +153,7 @@ class MeetingWatcher:
         try:
             from meeting_transcriber.audio.mac import record_audio
 
-            record_audio(
+            self._last_recording = record_audio(
                 audio_path,
                 app_pid=app_pid,
                 no_mic=self.no_mic,
@@ -201,7 +205,9 @@ class MeetingWatcher:
         except KeyboardInterrupt:
             console.print("\n[yellow]Manual stop.[/yellow]")
 
-    def _run_pipeline(self, audio_path: Path, meeting: DetectedMeeting) -> None:
+    def _run_pipeline(
+        self, audio_path: Path, meeting: DetectedMeeting, recording=None
+    ) -> None:
         """Transcribe + generate protocol."""
         title = meeting.window_title
         # Strip " | Microsoft Teams" etc. for a cleaner title
@@ -225,12 +231,18 @@ class MeetingWatcher:
         try:
             from meeting_transcriber.transcription.mac import transcribe
 
+            extra_kwargs = {}
+            if recording is not None:
+                extra_kwargs["app_audio"] = recording.app
+                extra_kwargs["mic_audio"] = recording.mic
+                extra_kwargs["mic_label"] = self.mic_label
             transcript = transcribe(
                 audio_path,
                 model=self.whisper_model,
                 diarize_enabled=self.diarize,
                 num_speakers=self.num_speakers,
                 meeting_title=title,
+                **extra_kwargs,
             )
         except Exception as e:
             console.print(
@@ -260,7 +272,7 @@ class MeetingWatcher:
         )
 
         try:
-            diarized = "[SPEAKER_" in transcript
+            diarized = bool(re.search(r"\[\w[\w\s]*\]", transcript))
             protocol_md = generate_protocol_cli(
                 transcript, title=title, diarized=diarized, claude_bin=self.claude_bin
             )
