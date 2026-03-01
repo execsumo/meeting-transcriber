@@ -1,24 +1,50 @@
 import SwiftUI
 
+private let defaults = UserDefaults.standard
+
 @Observable
 final class AppSettings {
     // MARK: - Apps to Watch
 
-    @ObservationIgnored @AppStorage("watchTeams") var watchTeams = true
-    @ObservationIgnored @AppStorage("watchZoom") var watchZoom = true
-    @ObservationIgnored @AppStorage("watchWebex") var watchWebex = true
+    var watchTeams: Bool = defaults.object(forKey: "watchTeams") as? Bool ?? true {
+        didSet { defaults.set(watchTeams, forKey: "watchTeams") }
+    }
+
+    var watchZoom: Bool = defaults.object(forKey: "watchZoom") as? Bool ?? true {
+        didSet { defaults.set(watchZoom, forKey: "watchZoom") }
+    }
+
+    var watchWebex: Bool = defaults.object(forKey: "watchWebex") as? Bool ?? true {
+        didSet { defaults.set(watchWebex, forKey: "watchWebex") }
+    }
 
     // MARK: - Recording
 
-    @ObservationIgnored @AppStorage("pollInterval") var pollInterval = 3.0
-    @ObservationIgnored @AppStorage("endGrace") var endGrace = 15.0
-    @ObservationIgnored @AppStorage("noMic") var noMic = false
+    var pollInterval: Double = defaults.object(forKey: "pollInterval") as? Double ?? 3.0 {
+        didSet { defaults.set(pollInterval, forKey: "pollInterval") }
+    }
+
+    var endGrace: Double = defaults.object(forKey: "endGrace") as? Double ?? 15.0 {
+        didSet { defaults.set(endGrace, forKey: "endGrace") }
+    }
+
+    var noMic: Bool = defaults.object(forKey: "noMic") as? Bool ?? false {
+        didSet { defaults.set(noMic, forKey: "noMic") }
+    }
 
     // MARK: - Transcription
 
-    @ObservationIgnored @AppStorage("whisperModel") var whisperModel = "large-v3-turbo-q5_0"
-    @ObservationIgnored @AppStorage("diarize") var diarize = false
-    @ObservationIgnored @AppStorage("numSpeakers") var numSpeakers = 2
+    var whisperModel: String = defaults.object(forKey: "whisperModel") as? String ?? "large-v3-turbo-q5_0" {
+        didSet { defaults.set(whisperModel, forKey: "whisperModel") }
+    }
+
+    var diarize: Bool = defaults.object(forKey: "diarize") as? Bool ?? false {
+        didSet { defaults.set(diarize, forKey: "diarize") }
+    }
+
+    var numSpeakers: Int = defaults.object(forKey: "numSpeakers") as? Int ?? 2 {
+        didSet { defaults.set(numSpeakers, forKey: "numSpeakers") }
+    }
 
     // MARK: - Computed
 
