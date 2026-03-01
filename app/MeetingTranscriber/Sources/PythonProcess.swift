@@ -8,6 +8,12 @@ final class PythonProcess {
     /// Posted when the Python process terminates unexpectedly.
     static let unexpectedTermination = Notification.Name("PythonProcessUnexpectedTermination")
 
+    // Crash-loop protection
+    private var crashTimestamps: [Date] = []
+    private static let maxCrashes = 3
+    private static let crashWindow: TimeInterval = 300  // 5 minutes
+    private(set) var crashLoopDetected = false
+
     private static var logFileURL: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".meeting-transcriber")
@@ -27,8 +33,19 @@ final class PythonProcess {
         }
     }
 
+    /// Reset crash-loop state so the process can be started again.
+    func resetCrashLoop() {
+        crashTimestamps.removeAll()
+        crashLoopDetected = false
+    }
+
     func start(arguments: [String] = ["--watch"]) {
         guard process == nil || process?.isRunning == false else { return }
+
+        if crashLoopDetected {
+            print("Refusing to start: crash loop detected (\(Self.maxCrashes) crashes in \(Int(Self.crashWindow))s)")
+            return
+        }
 
         let venvBin = (projectRoot as NSString).appendingPathComponent(".venv/bin")
         let transcribePath = (venvBin as NSString).appendingPathComponent("transcribe")
@@ -75,10 +92,29 @@ final class PythonProcess {
             if reason == .uncaughtSignal || (status != 0 && status != 2) {
                 // status 2 = SIGINT (normal shutdown via stop())
                 print("Python process terminated unexpectedly: status=\(status), reason=\(reason)")
+
+                // Track crash for crash-loop detection
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    let now = Date()
+                    self.crashTimestamps.append(now)
+                    // Only keep crashes within the window
+                    let cutoff = now.addingTimeInterval(-Self.crashWindow)
+                    self.crashTimestamps.removeAll { $0 < cutoff }
+
+                    if self.crashTimestamps.count >= Self.maxCrashes {
+                        self.crashLoopDetected = true
+                        print("Crash loop detected: \(self.crashTimestamps.count) crashes in \(Int(Self.crashWindow))s")
+                    }
+                }
+
                 NotificationCenter.default.post(
                     name: PythonProcess.unexpectedTermination,
                     object: nil,
-                    userInfo: ["status": status]
+                    userInfo: [
+                        "status": status,
+                        "crashLoop": self?.crashLoopDetected ?? false,
+                    ]
                 )
             }
             DispatchQueue.main.async {

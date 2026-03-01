@@ -129,9 +129,13 @@ struct MeetingTranscriberApp: App {
     }
 
     private func quit() {
-        pythonProcess.stop()
-        // Give Python a moment to clean up
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        if pythonProcess.isRunning {
+            pythonProcess.stop()
+            // Give Python time to clean up (graceful SIGINT shutdown)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                NSApplication.shared.terminate(nil)
+            }
+        } else {
             NSApplication.shared.terminate(nil)
         }
     }

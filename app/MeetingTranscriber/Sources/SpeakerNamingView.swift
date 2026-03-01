@@ -64,6 +64,7 @@ struct SpeakerNamingView: View {
 
     @State private var names: [String]
     @State private var audioPlayer: AVAudioPlayer?
+    @State private var completed = false
 
     init(request: SpeakerRequest, onComplete: @escaping ([String: String]) -> Void) {
         self.request = request
@@ -84,12 +85,16 @@ struct SpeakerNamingView: View {
 
             HStack(spacing: 12) {
                 Button("Skip") {
+                    guard !completed else { return }
+                    completed = true
                     onComplete([:])
                 }
                 .keyboardShortcut(.escape)
                 .accessibilityIdentifier("skip-button")
 
                 Button("Confirm") {
+                    guard !completed else { return }
+                    completed = true
                     confirm()
                 }
                 .keyboardShortcut(.return)
@@ -100,6 +105,16 @@ struct SpeakerNamingView: View {
         }
         .padding()
         .frame(minWidth: 400)
+        .onDisappear {
+            audioPlayer?.stop()
+            audioPlayer = nil
+            // If window is closed without Confirm/Skip, emit empty response
+            // so Python doesn't block waiting for speaker_response.json
+            if !completed {
+                completed = true
+                onComplete([:])
+            }
+        }
     }
 
     @ViewBuilder

@@ -21,11 +21,17 @@ final class AppSettings {
     // MARK: - Recording
 
     var pollInterval: Double = defaults.object(forKey: "pollInterval") as? Double ?? 3.0 {
-        didSet { defaults.set(pollInterval, forKey: "pollInterval") }
+        didSet {
+            pollInterval = max(pollInterval, 1.0)
+            defaults.set(pollInterval, forKey: "pollInterval")
+        }
     }
 
     var endGrace: Double = defaults.object(forKey: "endGrace") as? Double ?? 15.0 {
-        didSet { defaults.set(endGrace, forKey: "endGrace") }
+        didSet {
+            endGrace = max(endGrace, 5.0)
+            defaults.set(endGrace, forKey: "endGrace")
+        }
     }
 
     var noMic: Bool = defaults.object(forKey: "noMic") as? Bool ?? false {
@@ -43,7 +49,10 @@ final class AppSettings {
     }
 
     var numSpeakers: Int = defaults.object(forKey: "numSpeakers") as? Int ?? 2 {
-        didSet { defaults.set(numSpeakers, forKey: "numSpeakers") }
+        didSet {
+            numSpeakers = max(numSpeakers, 2)
+            defaults.set(numSpeakers, forKey: "numSpeakers")
+        }
     }
 
     // MARK: - Computed
