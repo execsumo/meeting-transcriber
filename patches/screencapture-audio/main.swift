@@ -595,7 +595,9 @@ struct ScreenCaptureAudio {
         }
         sigSource.resume()
 
-        // Run the main dispatch loop (replaces while-true sleep loop)
-        dispatchMain()
+        // Suspend forever — SIGTERM handler calls exit(0).
+        // Cannot use dispatchMain() here because async main already runs
+        // on the main dispatch queue (causes SIGTRAP crash).
+        await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
     }
 }
