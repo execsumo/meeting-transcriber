@@ -26,7 +26,10 @@ struct MeetingTranscriberApp: App {
                 onStartStop: toggleWatching,
                 onOpenLastProtocol: openLastProtocol,
                 onOpenProtocolsFolder: openProtocolsFolder,
-                onOpenSettings: { openWindow(id: "settings") },
+                onOpenSettings: {
+                    NSApp.activate()
+                    openWindow(id: "settings")
+                },
                 onNameSpeakers: {
                     loadSpeakerRequest()
                     NSApp.activate()
