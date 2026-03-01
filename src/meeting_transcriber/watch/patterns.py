@@ -40,6 +40,7 @@ TEAMS_PATTERN = AppMeetingPattern(
         r"^Teams \|",
         r"^Files \|",
         r"^Assignments \|",
+        r"^Settings \|",
     ],
 )
 
