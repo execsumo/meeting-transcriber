@@ -8,11 +8,22 @@ import subprocess
 import sys
 import threading
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
 from rich.console import Console
+
+
+@dataclass
+class RecordingResult:
+    """Result of a recording session with paths to individual tracks."""
+
+    mix: Path
+    app: Path | None = None
+    mic: Path | None = None
+
 
 log = logging.getLogger(__name__)
 
@@ -236,7 +247,7 @@ def record_audio(
     no_mic: bool = False,
     mic_device: int | None = None,
     stop_event: threading.Event | None = None,
-) -> Path:
+) -> RecordingResult:
     """Record app audio (ProcTap) and/or microphone (sounddevice).
 
     If stop_event is provided, recording is controlled externally (watch mode).
@@ -400,16 +411,20 @@ def record_audio(
             raw = raw[:n].reshape(-1, 2).mean(axis=1)
         audio_app = raw
 
-    # Save individual tracks to recordings/ for debugging
+    # Save individual tracks to recordings/
     rec_dir = Path("recordings")
     rec_dir.mkdir(exist_ok=True)
     ts = output_path.stem
+    app_path: Path | None = None
+    mic_path: Path | None = None
     if len(audio_app) > 0:
-        _save_wav(rec_dir / f"{ts}_app.wav", audio_app, app_rate)
-        console.print(f"[dim]App audio saved: recordings/{ts}_app.wav[/dim]")
+        app_path = rec_dir / f"{ts}_app.wav"
+        _save_wav(app_path, audio_app, app_rate)
+        console.print(f"[dim]App audio saved: {app_path}[/dim]")
     if len(audio_mic) > 0:
-        _save_wav(rec_dir / f"{ts}_mic.wav", audio_mic, mic_rate)
-        console.print(f"[dim]Mic audio saved: recordings/{ts}_mic.wav[/dim]")
+        mic_path = rec_dir / f"{ts}_mic.wav"
+        _save_wav(mic_path, audio_mic, mic_rate)
+        console.print(f"[dim]Mic audio saved: {mic_path}[/dim]")
 
     # Mix (both streams are at app_rate, no resampling needed)
     min_len = min(len(audio_mic), len(audio_app))
@@ -435,7 +450,7 @@ def record_audio(
 
     duration = len(mixed) / app_rate
     console.print(f"[green]Recording saved ({duration:.1f}s): {output_path}[/green]")
-    return output_path
+    return RecordingResult(mix=output_path, app=app_path, mic=mic_path)
 
 
 def _save_wav(path: Path, audio: np.ndarray, rate: int) -> None:

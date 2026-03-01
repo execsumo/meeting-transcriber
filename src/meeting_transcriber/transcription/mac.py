@@ -51,18 +51,9 @@ def _ensure_16khz(audio_path: Path) -> Path:
     return out_path
 
 
-def transcribe(
-    audio_path: Path,
-    model: str = DEFAULT_WHISPER_MODEL_MAC,
-    language: str | None = None,
-    diarize_enabled: bool = False,
-    num_speakers: int | None = None,
-    meeting_title: str = "Meeting",
-) -> str:
-    """Transcribe an audio file with pywhispercpp (whisper.cpp)."""
+def _load_whisper_model(model: str):
+    """Load the Whisper model once (shared between single/dual-source)."""
     from pywhispercpp.model import Model
-
-    whisper_path = _ensure_16khz(audio_path)
 
     n_threads = min(os.cpu_count() or 4, 8)
 
@@ -86,13 +77,157 @@ def transcribe(
                 "access for the initial download."
             ) from exc
 
-    console.print(f"[dim]Model loaded ({n_threads} threads). Transcribing ...[/dim]")
+    console.print(f"[dim]Model loaded ({n_threads} threads).[/dim]")
+    return whisper
+
+
+def _transcribe_segments(whisper_model, audio_path: Path, language: str | None = None):
+    """Transcribe audio into TimestampedSegments using a preloaded model."""
+    from meeting_transcriber.diarize import TimestampedSegment
+
+    whisper_path = _ensure_16khz(audio_path)
+
+    with Progress(
+        SpinnerColumn(), TextColumn("{task.description}"), transient=True
+    ) as progress:
+        progress.add_task(f"Transcribing {audio_path.name} ...", total=None)
+        segments = whisper_model.transcribe(str(whisper_path), language=language)
+
+    return [
+        TimestampedSegment(start=seg.t0 * 0.01, end=seg.t1 * 0.01, text=seg.text)
+        for seg in segments
+    ]
+
+
+def _merge_segments(app_segments: list, mic_segments: list) -> list:
+    """Merge app and mic segments by start timestamp."""
+    merged = list(app_segments) + list(mic_segments)
+    merged.sort(key=lambda seg: seg.start)
+    return merged
+
+
+def _transcribe_dual_source(
+    whisper_model,
+    app_audio: Path,
+    mic_audio: Path,
+    language: str | None = None,
+    diarize_enabled: bool = False,
+    num_speakers: int | None = None,
+    meeting_title: str = "Meeting",
+    mic_label: str = "Me",
+) -> str:
+    """Transcribe app and mic tracks separately, merge by timestamp."""
+    from meeting_transcriber.diarize import (
+        assign_speakers,
+        diarize,
+        format_diarized_transcript,
+    )
+
+    # 1. Transcribe both tracks
+    console.print("[dim]Transcribing app audio ...[/dim]")
+    app_segments = _transcribe_segments(whisper_model, app_audio, language)
+    console.print(f"[dim]App: {len(app_segments)} segments[/dim]")
+
+    console.print("[dim]Transcribing mic audio ...[/dim]")
+    mic_segments = _transcribe_segments(whisper_model, mic_audio, language)
+    console.print(f"[dim]Mic: {len(mic_segments)} segments[/dim]")
+
+    # 2. Label app segments
+    if diarize_enabled:
+        try:
+            turns = diarize(
+                app_audio, num_speakers=num_speakers, meeting_title=meeting_title
+            )
+            app_segments = assign_speakers(app_segments, turns)
+        except Exception as exc:
+            console.print(
+                f"[red]App diarization failed: {exc}[/red]\n"
+                "[yellow]Labelling app segments as 'Remote'.[/yellow]"
+            )
+            for seg in app_segments:
+                seg.speaker = "Remote"
+    else:
+        for seg in app_segments:
+            seg.speaker = "Remote"
+
+    # 3. Label mic segments
+    if mic_label:
+        # Solo mode: single person at the mic
+        for seg in mic_segments:
+            seg.speaker = mic_label
+    else:
+        # Multi mode: diarize the mic track too
+        if diarize_enabled:
+            try:
+                mic_turns = diarize(
+                    mic_audio, num_speakers=None, meeting_title=meeting_title
+                )
+                mic_segments = assign_speakers(mic_segments, mic_turns)
+            except Exception as exc:
+                console.print(
+                    f"[red]Mic diarization failed: {exc}[/red]\n"
+                    "[yellow]Labelling mic segments as 'Local'.[/yellow]"
+                )
+                for seg in mic_segments:
+                    seg.speaker = "Local"
+        else:
+            for seg in mic_segments:
+                seg.speaker = "Local"
+
+    # 4. Merge and format
+    merged = _merge_segments(app_segments, mic_segments)
+    text = format_diarized_transcript(merged)
+
+    console.print(
+        f"[green]Dual-source transcription complete ({len(text)} characters)[/green]"
+    )
+    return text
+
+
+def transcribe(
+    audio_path: Path,
+    model: str = DEFAULT_WHISPER_MODEL_MAC,
+    language: str | None = None,
+    diarize_enabled: bool = False,
+    num_speakers: int | None = None,
+    meeting_title: str = "Meeting",
+    *,
+    app_audio: Path | None = None,
+    mic_audio: Path | None = None,
+    mic_label: str = "Me",
+) -> str:
+    """Transcribe an audio file with pywhispercpp (whisper.cpp).
+
+    If both app_audio and mic_audio are provided, uses dual-source mode:
+    transcribes each track separately and merges by timestamp.
+    Otherwise, falls back to single-source mode using audio_path (the mix).
+    """
+    whisper_model = _load_whisper_model(model)
+
+    # Dual-source mode: separate app + mic tracks
+    if app_audio and mic_audio:
+        console.print("[dim]Dual-source mode: transcribing app + mic separately[/dim]")
+        return _transcribe_dual_source(
+            whisper_model,
+            app_audio,
+            mic_audio,
+            language=language,
+            diarize_enabled=diarize_enabled,
+            num_speakers=num_speakers,
+            meeting_title=meeting_title,
+            mic_label=mic_label,
+        )
+
+    # Single-source mode (original behavior)
+    whisper_path = _ensure_16khz(audio_path)
+
+    console.print("[dim]Transcribing ...[/dim]")
 
     with Progress(
         SpinnerColumn(), TextColumn("{task.description}"), transient=True
     ) as progress:
         progress.add_task("Transcribing audio ...", total=None)
-        segments = whisper.transcribe(str(whisper_path), language=language)
+        segments = whisper_model.transcribe(str(whisper_path), language=language)
 
     if not diarize_enabled:
         text = " ".join(seg.text for seg in segments).strip()

@@ -26,11 +26,17 @@ def generate_protocol_cli(
     prompt = PROTOCOL_PROMPT
     if diarized:
         prompt += (
-            "\nNote: The transcript contains speaker labels like [SPEAKER_00], "
-            "[SPEAKER_01] etc. Use these to identify different participants. "
-            "In the Participants section, list them as Speaker 1, Speaker 2 etc. "
-            "(or by name if mentioned in the conversation). "
-            "In the Topics Discussed section, attribute key statements to speakers.\n\n"
+            "\nNote: The transcript contains speaker labels in brackets. "
+            "Possible label formats:\n"
+            "- [SPEAKER_00], [SPEAKER_01] — auto-detected speakers "
+            "(use Speaker 1, Speaker 2)\n"
+            "- [Me], [Roman] etc. — the local microphone user\n"
+            "- [Remote] — remote participant(s) without diarization\n"
+            "- [Name] — a recognized or named speaker\n"
+            "Use these labels to identify participants. "
+            "In the Participants section, list them by name where possible. "
+            "In the Topics Discussed section, attribute key statements "
+            "to speakers.\n\n"
         )
     prompt += transcript
 
