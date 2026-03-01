@@ -340,37 +340,53 @@ def record_audio(
         console.print("[dim]Microphone disabled (--no-mic)[/dim]")
 
     # ── Recording loop ───────────────────────────────────────────────────
-    if stop_event is None:
-        # Interactive mode: user presses Enter to stop
-        console.print(
-            "\n[bold green]Recording ...[/bold green]  [dim]Press Enter to stop[/dim]\n"
-        )
-        input()
-        _stop.set()
-    else:
-        # Watch mode: externally controlled via stop_event
-        console.print(
-            "\n[bold green]Recording ...[/bold green]  [dim](auto-stop)[/dim]\n"
-        )
-        _stop.wait()
-
-    if mic_stream:
-        mic_stream.stop()
-        mic_stream.close()
-    if app_proc:
-        app_proc.send_signal(signal.SIGTERM)
-        if app_reader_thread:
-            app_reader_thread.join(timeout=2)
-        stderr_out = app_proc.stderr.read().decode("utf-8", errors="ignore")
-        if stderr_out:
-            for line in stderr_out.strip().splitlines():
-                if "Audio format:" in line or "WARNING" in line or "ERROR" in line:
-                    console.print(f"[dim]{line}[/dim]")
-        try:
-            app_proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            app_proc.kill()
-            app_proc.wait()
+    try:
+        if stop_event is None:
+            # Interactive mode: user presses Enter to stop
+            console.print(
+                "\n[bold green]Recording ...[/bold green]"
+                "  [dim]Press Enter to stop[/dim]\n"
+            )
+            input()
+            _stop.set()
+        else:
+            # Watch mode: externally controlled via stop_event
+            console.print(
+                "\n[bold green]Recording ...[/bold green]  [dim](auto-stop)[/dim]\n"
+            )
+            _stop.wait()
+    finally:
+        # Always clean up resources, even if an exception occurs
+        if mic_stream:
+            try:
+                mic_stream.stop()
+                mic_stream.close()
+            except Exception as exc:
+                log.warning("Error closing mic stream: %s", exc)
+        if app_proc:
+            try:
+                app_proc.send_signal(signal.SIGTERM)
+            except OSError:
+                pass  # Process already dead
+            if app_reader_thread:
+                app_reader_thread.join(timeout=2)
+            try:
+                stderr_out = app_proc.stderr.read().decode("utf-8", errors="ignore")
+                if stderr_out:
+                    for line in stderr_out.strip().splitlines():
+                        if (
+                            "Audio format:" in line
+                            or "WARNING" in line
+                            or "ERROR" in line
+                        ):
+                            console.print(f"[dim]{line}[/dim]")
+            except Exception:
+                pass
+            try:
+                app_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                app_proc.kill()
+                app_proc.wait()
 
     # ── Mix → WAV ────────────────────────────────────────────────────────
     audio_mic = np.concatenate(frames_mic) if frames_mic else np.zeros(0)
@@ -407,8 +423,7 @@ def record_audio(
         mixed = audio_mic if len(audio_mic) > 0 else audio_app
 
     if len(mixed) == 0:
-        console.print("[red]No audio data recorded.[/red]")
-        sys.exit(1)
+        raise RuntimeError("No audio data recorded")
 
     # Save mix to recordings/ and use as output
     mix_path = rec_dir / f"{ts}_mix.wav"

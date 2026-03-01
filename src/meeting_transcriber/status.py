@@ -52,6 +52,7 @@ def emit(state, *, detail="", meeting=None, protocol_path=None, error=None):
         "pid": os.getpid(),
     }
 
+    tmp_path = None
     try:
         fd, tmp_path = tempfile.mkstemp(
             dir=STATUS_DIR, prefix=".status_", suffix=".tmp"
@@ -62,7 +63,8 @@ def emit(state, *, detail="", meeting=None, protocol_path=None, error=None):
         os.replace(tmp_path, STATUS_FILE)
     except OSError:
         # Best-effort: don't crash the pipeline over status updates
-        try:
-            Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
