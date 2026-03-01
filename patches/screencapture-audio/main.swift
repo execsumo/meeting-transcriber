@@ -126,9 +126,21 @@ class MicCaptureHandler {
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
+        let inputNode = engine.inputNode
+
+        // Remove tap first (before disabling VoiceProcessingIO)
+        inputNode.removeTap(onBus: 0)
+
+        // Disable VoiceProcessingIO — releases exclusive mic lock
+        try? inputNode.setVoiceProcessingEnabled(false)
+
+        // Stop and reset engine to fully release audio resources
         engine.stop()
-        outputFile = nil  // AVAudioFile finalizes WAV header on dealloc
+        engine.reset()
+
+        // Finalize WAV header
+        outputFile = nil
+
         fputs("Mic recording stopped\n", stderr)
     }
 }
