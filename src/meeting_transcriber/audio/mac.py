@@ -377,6 +377,17 @@ def record_audio(
     elif no_mic:
         console.print("[dim]Microphone disabled (--no-mic)[/dim]")
 
+    # ── Mute detection (Teams only, best-effort) ────────────────────────
+    mute_tracker = None
+    if app_pid and not no_mic:
+        try:
+            from meeting_transcriber.watch.mute_detector import MuteTracker
+
+            mute_tracker = MuteTracker(teams_pid=app_pid)
+            mute_tracker.start()
+        except Exception as exc:
+            log.debug("Mute tracker not available: %s", exc)
+
     # ── Recording loop ───────────────────────────────────────────────────
     try:
         if stop_event is None:
@@ -395,6 +406,8 @@ def record_audio(
             _stop.wait()
     finally:
         # Always clean up resources, even if an exception occurs
+        if mute_tracker:
+            mute_tracker.stop()
         if mic_stream:
             try:
                 mic_stream.stop()
@@ -512,6 +525,7 @@ def record_audio(
         app=app_path,
         mic=mic_path,
         mic_delay=mic_delay,
+        mute_timeline=mute_tracker.timeline if mute_tracker else [],
     )
 
 

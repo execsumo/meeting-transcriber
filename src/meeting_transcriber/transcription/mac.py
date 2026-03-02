@@ -54,6 +54,75 @@ def _ensure_16khz(audio_path: Path) -> Path:
     return out_path
 
 
+def _apply_mute_mask(
+    mic_path: Path,
+    mute_timeline: list,
+    mic_delay: float = 0.0,
+    recording_start: float = 0.0,
+) -> Path:
+    """Zero out mic samples during muted periods.
+
+    Args:
+        mic_path: Path to the mic WAV file.
+        mute_timeline: List of MuteTransition objects with timestamp/is_muted.
+        mic_delay: Seconds the mic started after the recording reference time.
+        recording_start: time.monotonic() value when recording started
+                        (used to convert MuteTransition timestamps).
+
+    Returns:
+        Path to the masked WAV (or original if no muting needed).
+    """
+    if not mute_timeline:
+        return mic_path
+
+    mic_path = _ensure_16khz(mic_path)
+    rate = TARGET_RATE
+
+    with wave.open(str(mic_path), "rb") as wf:
+        raw = wf.readframes(wf.getnframes())
+    mic = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+    total_zeroed = 0
+    for i, transition in enumerate(mute_timeline):
+        if not transition.is_muted:
+            continue
+
+        # Find when this muted period ends
+        mute_start = transition.timestamp - recording_start - mic_delay
+        mute_end = None
+        for j in range(i + 1, len(mute_timeline)):
+            if not mute_timeline[j].is_muted:
+                mute_end = mute_timeline[j].timestamp - recording_start - mic_delay
+                break
+
+        # Convert to sample indices
+        start_sample = max(0, int(mute_start * rate))
+        end_sample = int(mute_end * rate) if mute_end is not None else len(mic)
+        end_sample = min(end_sample, len(mic))
+
+        if start_sample < end_sample:
+            mic[start_sample:end_sample] = 0.0
+            total_zeroed += end_sample - start_sample
+
+    if total_zeroed == 0:
+        return mic_path
+
+    zeroed_sec = total_zeroed / rate
+    total_sec = len(mic) / rate
+    log.info("Mute mask: %.1fs / %.1fs zeroed", zeroed_sec, total_sec)
+    console.print(f"[dim]Mute mask: {zeroed_sec:.1f}s / {total_sec:.1f}s zeroed[/dim]")
+
+    out_path = mic_path.with_stem(mic_path.stem + "_unmuted")
+    audio_int16 = (np.clip(mic, -1.0, 1.0) * 32767).astype(np.int16)
+    with wave.open(str(out_path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(audio_int16.tobytes())
+
+    return out_path
+
+
 def _suppress_echo(
     app_path: Path,
     mic_path: Path,
@@ -230,9 +299,12 @@ def _transcribe_dual_source(
         format_diarized_transcript,
     )
 
-    # 1. Suppress echo in mic track
+    # 1a. Apply mute mask (zero mic during muted periods)
+    mic_masked = _apply_mute_mask(mic_audio, mute_timeline or [], mic_delay=mic_delay)
+
+    # 1b. Suppress echo in mic track
     console.print("[dim]Suppressing echo in mic track ...[/dim]")
-    mic_clean = _suppress_echo(app_audio, mic_audio, mic_delay=mic_delay)
+    mic_clean = _suppress_echo(app_audio, mic_masked, mic_delay=mic_delay)
 
     # 2. Transcribe both tracks
     console.print("[dim]Transcribing app audio ...[/dim]")
