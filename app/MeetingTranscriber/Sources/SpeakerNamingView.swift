@@ -79,6 +79,12 @@ func buildSpeakerMapping(
     return mapping
 }
 
+/// Resolve a speaker sample file path, expanding ~ in the base directory.
+func sampleURL(baseDir: String, sampleFile: String) -> URL {
+    let dir = (baseDir as NSString).expandingTildeInPath
+    return URL(fileURLWithPath: dir).appendingPathComponent(sampleFile)
+}
+
 /// Window that lets the user name speakers after diarization.
 struct SpeakerNamingView: View {
     let request: SpeakerRequest
@@ -183,9 +189,7 @@ struct SpeakerNamingView: View {
     }
 
     private func playSample(speaker: SpeakerInfo) {
-        let dir = (request.audioSamplesDir as NSString).expandingTildeInPath
-        let url = URL(fileURLWithPath: dir)
-            .appendingPathComponent(speaker.sampleFile)
+        let url = sampleURL(baseDir: request.audioSamplesDir, sampleFile: speaker.sampleFile)
 
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 

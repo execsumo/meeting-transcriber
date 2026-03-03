@@ -5,9 +5,9 @@ import UserNotifications
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
 
-    private var isSetUp = false
+    private(set) var isSetUp = false
 
-    private override init() {
+    override init() {
         super.init()
     }
 

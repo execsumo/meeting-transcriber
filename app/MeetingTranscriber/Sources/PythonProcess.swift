@@ -25,6 +25,21 @@ final class PythonProcess {
 
     var isRunning: Bool { process?.isRunning == true }
 
+    /// Open a log file for appending, creating it if needed. Falls back to /dev/null.
+    static func openLogHandle(at url: URL) -> FileHandle {
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            return handle
+        }
+        // Create the file and retry
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            return handle
+        }
+        return .nullDevice
+    }
+
     init() {
         // 1. TRANSCRIBER_ROOT env var (set by run_app.sh)
         // 2. Walk up from executable looking for pyproject.toml
@@ -106,21 +121,9 @@ final class PythonProcess {
         proc.environment = env
 
         // Pipe stdout + stderr to log file for debugging
-        if let logHandle = try? FileHandle(forWritingTo: Self.logFileURL) {
-            logHandle.seekToEndOfFile()
-            proc.standardOutput = logHandle
-            proc.standardError = logHandle
-        } else {
-            // Create the file and retry
-            FileManager.default.createFile(atPath: Self.logFileURL.path, contents: nil)
-            if let logHandle = try? FileHandle(forWritingTo: Self.logFileURL) {
-                proc.standardOutput = logHandle
-                proc.standardError = logHandle
-            } else {
-                proc.standardOutput = FileHandle.nullDevice
-                proc.standardError = FileHandle.nullDevice
-            }
-        }
+        let logHandle = Self.openLogHandle(at: Self.logFileURL)
+        proc.standardOutput = logHandle
+        proc.standardError = logHandle
 
         // Detect unexpected termination (crash, signal)
         proc.terminationHandler = { [weak self] terminatedProc in
