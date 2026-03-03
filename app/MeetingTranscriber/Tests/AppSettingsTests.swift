@@ -26,7 +26,7 @@ final class AppSettingsTests: XCTestCase {
     func testDefaultValues() {
         XCTAssertEqual(settings.pollInterval, 3.0)
         XCTAssertEqual(settings.endGrace, 15.0)
-        XCTAssertEqual(settings.numSpeakers, 2)
+        XCTAssertEqual(settings.numSpeakers, 0)
         XCTAssertTrue(settings.watchTeams)
         XCTAssertTrue(settings.watchZoom)
         XCTAssertTrue(settings.watchWebex)
@@ -69,13 +69,13 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testNumSpeakersClampedToMinimum() {
-        settings.numSpeakers = 1
-        XCTAssertEqual(settings.numSpeakers, 2)
+        settings.numSpeakers = -1
+        XCTAssertEqual(settings.numSpeakers, 0)
     }
 
     func testNumSpeakersClampedToMinimumZero() {
         settings.numSpeakers = 0
-        XCTAssertEqual(settings.numSpeakers, 2)
+        XCTAssertEqual(settings.numSpeakers, 0)
     }
 
     func testNumSpeakersAcceptsValidValue() {
