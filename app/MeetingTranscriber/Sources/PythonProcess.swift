@@ -31,7 +31,17 @@ final class PythonProcess {
         if let envRoot = ProcessInfo.processInfo.environment["TRANSCRIBER_ROOT"] {
             projectRoot = envRoot
         } else {
-            projectRoot = Self.findProjectRoot() ?? FileManager.default.currentDirectoryPath
+            projectRoot = Self.findProjectRoot(from: nil) ?? FileManager.default.currentDirectoryPath
+        }
+    }
+
+    /// Record a crash and update crash-loop detection state.
+    func recordCrash(at date: Date = Date()) {
+        crashTimestamps.append(date)
+        let cutoff = date.addingTimeInterval(-Self.crashWindow)
+        crashTimestamps.removeAll { $0 < cutoff }
+        if crashTimestamps.count >= Self.maxCrashes {
+            crashLoopDetected = true
         }
     }
 
@@ -123,15 +133,9 @@ final class PythonProcess {
                 // Track crash for crash-loop detection
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    let now = Date()
-                    self.crashTimestamps.append(now)
-                    // Only keep crashes within the window
-                    let cutoff = now.addingTimeInterval(-Self.crashWindow)
-                    self.crashTimestamps.removeAll { $0 < cutoff }
-
-                    if self.crashTimestamps.count >= Self.maxCrashes {
-                        self.crashLoopDetected = true
-                        print("Crash loop detected: \(self.crashTimestamps.count) crashes in \(Int(Self.crashWindow))s")
+                    self.recordCrash()
+                    if self.crashLoopDetected {
+                        print("Crash loop detected: \(Self.maxCrashes) crashes in \(Int(Self.crashWindow))s")
                     }
                 }
 
@@ -172,9 +176,9 @@ final class PythonProcess {
 
     // MARK: - Project Root Discovery
 
-    private static func findProjectRoot() -> String? {
-        var dir = URL(fileURLWithPath: Bundle.main.executablePath ?? "")
-            .deletingLastPathComponent()
+    static func findProjectRoot(from startURL: URL? = nil) -> String? {
+        let start = startURL ?? URL(fileURLWithPath: Bundle.main.executablePath ?? "")
+        var dir = start.deletingLastPathComponent()
 
         for _ in 0..<10 {
             let pyproject = dir.appendingPathComponent("pyproject.toml")
