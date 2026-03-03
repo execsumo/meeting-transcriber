@@ -272,4 +272,109 @@ final class PythonProcessTests: XCTestCase {
         pp.start(arguments: ["--help"])
         XCTAssertFalse(pp.isRunning)
     }
+
+    // MARK: - stop() terminates a running process via SIGINT
+
+    func testStopInterruptsRunningProcess() {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // trap SIGINT so the shell doesn't exit immediately, then sleep
+        proc.arguments = ["-c", "trap '' INT; sleep 30"]
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+
+        let doneExp = expectation(description: "process terminated")
+        proc.terminationHandler = { _ in
+            doneExp.fulfill()
+        }
+
+        try! proc.run()
+        XCTAssertTrue(proc.isRunning)
+
+        // Interrupt (SIGINT), then force-terminate after brief delay
+        proc.interrupt()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+            if proc.isRunning { proc.terminate() }
+        }
+
+        wait(for: [doneExp], timeout: 5.0)
+        XCTAssertFalse(proc.isRunning)
+    }
+
+    func testStopWhenNotRunningIsNoOp() {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.arguments = ["-c", "exit 0"]
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+
+        try! proc.run()
+        proc.waitUntilExit()
+
+        // Already exited — interrupt should not crash
+        proc.interrupt()
+    }
+
+    // MARK: - openLogHandle
+
+    func testOpenLogHandleExistingFile() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("log-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let logFile = tmpDir.appendingPathComponent("test.log")
+        FileManager.default.createFile(atPath: logFile.path, contents: nil)
+
+        let handle = PythonProcess.openLogHandle(at: logFile)
+        XCTAssertNotEqual(handle, .nullDevice)
+
+        // Write something and verify
+        handle.write("hello".data(using: .utf8)!)
+        handle.closeFile()
+        let contents = try String(contentsOf: logFile, encoding: .utf8)
+        XCTAssertEqual(contents, "hello")
+    }
+
+    func testOpenLogHandleCreatesFileIfMissing() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("log-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let logFile = tmpDir.appendingPathComponent("new.log")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: logFile.path))
+
+        let handle = PythonProcess.openLogHandle(at: logFile)
+        XCTAssertNotEqual(handle, .nullDevice)
+
+        handle.write("created".data(using: .utf8)!)
+        handle.closeFile()
+        let contents = try String(contentsOf: logFile, encoding: .utf8)
+        XCTAssertEqual(contents, "created")
+    }
+
+    func testOpenLogHandleFallsBackToNullDevice() {
+        // Path with no parent directory — can't create file
+        let impossible = URL(fileURLWithPath: "/nonexistent-dir-\(UUID().uuidString)/test.log")
+        let handle = PythonProcess.openLogHandle(at: impossible)
+        XCTAssertEqual(handle, .nullDevice)
+    }
+
+    func testOpenLogHandleAppends() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("log-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let logFile = tmpDir.appendingPathComponent("append.log")
+        try "existing\n".write(to: logFile, atomically: true, encoding: .utf8)
+
+        let handle = PythonProcess.openLogHandle(at: logFile)
+        handle.write("appended".data(using: .utf8)!)
+        handle.closeFile()
+
+        let contents = try String(contentsOf: logFile, encoding: .utf8)
+        XCTAssertEqual(contents, "existing\nappended")
+    }
 }

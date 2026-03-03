@@ -60,4 +60,38 @@ final class FormattingHelpersTests: XCTestCase {
         XCTAssertEqual(mapping["SPEAKER_00"], "Roman")
         XCTAssertNil(mapping["SPEAKER_01"])
     }
+
+    // MARK: - sampleURL
+
+    func testSampleURLAbsolutePath() {
+        let url = sampleURL(baseDir: "/tmp/samples", sampleFile: "SPEAKER_00.wav")
+        XCTAssertEqual(url.path, "/tmp/samples/SPEAKER_00.wav")
+    }
+
+    func testSampleURLExpandsTilde() {
+        let url = sampleURL(baseDir: "~/audio", sampleFile: "s0.wav")
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        XCTAssertEqual(url.path, "\(home)/audio/s0.wav")
+    }
+
+    func testSampleURLNestedFile() {
+        let url = sampleURL(baseDir: "/data/meeting", sampleFile: "subdir/file.wav")
+        XCTAssertEqual(url.path, "/data/meeting/subdir/file.wav")
+    }
+
+    func testSampleURLFileExistsCheck() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sample-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // File doesn't exist
+        let missing = sampleURL(baseDir: tmpDir.path, sampleFile: "ghost.wav")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
+
+        // Create file, now it exists
+        let existing = sampleURL(baseDir: tmpDir.path, sampleFile: "real.wav")
+        FileManager.default.createFile(atPath: existing.path, contents: nil)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: existing.path))
+    }
 }
