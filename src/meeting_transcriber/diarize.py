@@ -833,8 +833,18 @@ def assign_speakers(
     return segments
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as [MM:SS] or [H:MM:SS] for longer recordings."""
+    total = int(seconds)
+    h, remainder = divmod(total, 3600)
+    m, s = divmod(remainder, 60)
+    if h > 0:
+        return f"[{h}:{m:02d}:{s:02d}]"
+    return f"[{m:02d}:{s:02d}]"
+
+
 def format_diarized_transcript(segments: list[TimestampedSegment]) -> str:
-    """Format segments with speaker labels, grouping consecutive segments."""
+    """Format segments with timestamps and speaker labels."""
     if not segments:
         return ""
 
@@ -842,9 +852,14 @@ def format_diarized_transcript(segments: list[TimestampedSegment]) -> str:
     current_speaker = None
 
     for seg in segments:
+        ts = _format_timestamp(seg.start)
+        text = seg.text.strip()
+        if not text:
+            continue
         if seg.speaker != current_speaker:
             current_speaker = seg.speaker
-            lines.append(f"\n[{current_speaker}]")
-        lines.append(seg.text.strip())
+            lines.append(f"{ts} [{current_speaker}] {text}")
+        else:
+            lines.append(f"{ts} {text}")
 
-    return " ".join(lines).strip()
+    return "\n".join(lines)

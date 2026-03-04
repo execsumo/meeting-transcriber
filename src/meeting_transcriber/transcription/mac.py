@@ -461,7 +461,17 @@ def transcribe(
         segments = whisper_model.transcribe(str(whisper_path), language=language)
 
     if not diarize_enabled:
-        text = " ".join(seg.text for seg in segments).strip()
+        lines = []
+        for seg in segments:
+            ts_sec = seg.t0 * 0.01
+            total = int(ts_sec)
+            h, remainder = divmod(total, 3600)
+            m, s = divmod(remainder, 60)
+            ts = f"[{h}:{m:02d}:{s:02d}]" if h > 0 else f"[{m:02d}:{s:02d}]"
+            text_part = seg.text.strip()
+            if text_part:
+                lines.append(f"{ts} {text_part}")
+        text = "\n".join(lines)
         console.print(f"[green]Transcription complete ({len(text)} characters)[/green]")
         return text
 
