@@ -1,4 +1,4 @@
-"""macOS audio recording via ScreenCaptureKit (direct) and sounddevice."""
+"""macOS audio recording via CATapDescription (audiotap) and sounddevice."""
 
 import logging
 import os
@@ -31,7 +31,7 @@ class RecordingResult:
 
 log = logging.getLogger(__name__)
 
-RECORD_RATE = 48000  # native rate for ScreenCaptureKit
+RECORD_RATE = 48000  # native rate for CATapDescription aggregate device
 
 console = Console()
 
@@ -192,52 +192,34 @@ def choose_app(app_name: str | None) -> dict | None:
         sys.exit(1)
 
 
-def _pid_to_bundle_id(pid: int) -> str | None:
-    """Resolve a PID to its application bundle ID via AppKit."""
-    try:
-        from AppKit import NSRunningApplication
-    except ImportError:
-        return None
-    app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
-    if app:
-        return app.bundleIdentifier()
-    return None
-
-
 def _find_swift_binary() -> Path | None:
-    """Find the screencapture-audio Swift binary.
+    """Find the audiotap Swift binary.
 
     Search order:
-    1. PROCTAP_BINARY environment variable
-    2. Known venv paths (with executable check)
+    1. AUDIOTAP_BINARY environment variable
+    2. Project-local build output (tools/audiotap/.build/release/audiotap)
     3. shutil.which() fallback
     """
     # 1. Explicit env var
-    env_path = os.environ.get("PROCTAP_BINARY")
+    env_path = os.environ.get("AUDIOTAP_BINARY")
     if env_path:
         p = Path(env_path)
         if p.is_file() and os.access(p, os.X_OK):
             return p
-        log.warning("PROCTAP_BINARY=%s is not an executable file", env_path)
+        log.warning("AUDIOTAP_BINARY=%s is not an executable file", env_path)
 
-    # 2. Known venv build output paths
-    venv = Path(sys.prefix)
-    base = venv / "lib"
-    for python_dir in sorted(base.glob("python*"), reverse=True):
-        swift_dir = (
-            python_dir / "site-packages/proctap/swift/screencapture-audio/.build"
-        )
-        for sub in [
-            "arm64-apple-macosx/release",
-            "release",
-            "x86_64-apple-macosx/release",
-        ]:
-            candidate = swift_dir / sub / "screencapture-audio"
+    # 2. Project-local build output (walk up from package to find tools/)
+    # Also check relative to the source file location
+    for anchor in [Path(__file__).resolve(), Path.cwd()]:
+        d = anchor
+        for _ in range(6):
+            d = d.parent
+            candidate = d / "tools" / "audiotap" / ".build" / "release" / "audiotap"
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return candidate
 
     # 3. Fall back to PATH lookup
-    which = shutil.which("screencapture-audio")
+    which = shutil.which("audiotap")
     if which:
         return Path(which)
 
@@ -253,10 +235,10 @@ def record_audio(
     mic_device_uid: str | None = None,
     stop_event: threading.Event | None = None,
 ) -> RecordingResult:
-    """Record app audio (ProcTap) and/or microphone (sounddevice).
+    """Record app audio (audiotap/CATapDescription) and/or microphone (sounddevice).
 
     Args:
-        mic_device_uid: CoreAudio device UID for ProcTap mic selection.
+        mic_device_uid: CoreAudio device UID for audiotap mic selection.
 
     If stop_event is provided, recording is controlled externally (watch mode).
     Otherwise, the user presses Enter to stop (interactive mode).
@@ -266,90 +248,81 @@ def record_audio(
     _stop = stop_event if stop_event is not None else threading.Event()
     app_rate = RECORD_RATE
     app_channels = 2
-    mic_wav_path: Path | None = None  # mic WAV written by ProcTap
+    mic_wav_path: Path | None = None  # mic WAV written by audiotap
 
-    # ── App audio via ScreenCaptureKit (direct subprocess) ──────────────
+    # ── App audio via CATapDescription (audiotap subprocess) ────────────
     app_proc = None
     app_reader_thread = None
-    proctap_has_mic = False  # ProcTap is recording mic with --mic flag
+    audiotap_has_mic = False  # audiotap is recording mic with --mic flag
     if app_pid and not mic_only:
-        bundle_id = _pid_to_bundle_id(app_pid)
-        if not bundle_id:
+        binary = _find_swift_binary()
+        if not binary:
             console.print(
-                f"[yellow]Cannot resolve bundle ID for PID {app_pid},"
+                "[red]audiotap binary not found."
+                " Run: cd tools/audiotap && swift build -c release[/red]"
+            )
+            sys.exit(1)
+
+        try:
+            # Save individual tracks to recordings/
+            from meeting_transcriber.config import get_data_dir
+
+            rec_dir = get_data_dir() / "recordings"
+            rec_dir.mkdir(exist_ok=True)
+            ts = output_path.stem
+
+            cmd = [
+                str(binary),
+                str(app_pid),
+                str(RECORD_RATE),
+                str(app_channels),
+            ]
+
+            # Pass --mic to audiotap when mic is enabled
+            if not no_mic:
+                mic_wav_path = rec_dir / f"{ts}_mic.wav"
+                cmd.extend(["--mic", str(mic_wav_path)])
+                if mic_device_uid:
+                    cmd.extend(["--mic-device", mic_device_uid])
+                audiotap_has_mic = True
+
+            app_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+
+            def _read_app_audio():
+                chunk_size = RECORD_RATE * app_channels * 4 * 10 // 1000
+                while not _stop.is_set():
+                    data = app_proc.stdout.read(chunk_size)
+                    if not data:
+                        break
+                    frames_app.append(data)
+
+            app_reader_thread = threading.Thread(target=_read_app_audio, daemon=True)
+            app_reader_thread.start()
+            console.print(
+                f"[dim]App audio active: PID {app_pid},"
+                f" {RECORD_RATE} Hz, {app_channels}ch[/dim]"
+            )
+            if audiotap_has_mic:
+                console.print("[dim]Mic recording via audiotap[/dim]")
+        except Exception as e:
+            console.print(
+                f"[yellow]App audio failed ({type(e).__name__}: {e}),"
                 " microphone only.[/yellow]"
             )
-        else:
-            binary = _find_swift_binary()
-            if not binary:
-                console.print(
-                    "[red]screencapture-audio binary not found."
-                    " Run: ./scripts/build_proctap.sh[/red]"
-                )
-                sys.exit(1)
+            app_proc = None
+            audiotap_has_mic = False
+            mic_wav_path = None
 
-            try:
-                # Save individual tracks to recordings/
-                from meeting_transcriber.config import get_data_dir
-
-                rec_dir = get_data_dir() / "recordings"
-                rec_dir.mkdir(exist_ok=True)
-                ts = output_path.stem
-
-                cmd = [
-                    str(binary),
-                    bundle_id,
-                    str(RECORD_RATE),
-                    str(app_channels),
-                ]
-
-                # Pass --mic to ProcTap when mic is enabled
-                if not no_mic:
-                    mic_wav_path = rec_dir / f"{ts}_mic.wav"
-                    cmd.extend(["--mic", str(mic_wav_path)])
-                    if mic_device_uid:
-                        cmd.extend(["--mic-device", mic_device_uid])
-                    proctap_has_mic = True
-
-                app_proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=0,
-                )
-
-                def _read_app_audio():
-                    chunk_size = RECORD_RATE * app_channels * 4 * 10 // 1000
-                    while not _stop.is_set():
-                        data = app_proc.stdout.read(chunk_size)
-                        if not data:
-                            break
-                        frames_app.append(data)
-
-                app_reader_thread = threading.Thread(
-                    target=_read_app_audio, daemon=True
-                )
-                app_reader_thread.start()
-                console.print(
-                    f"[dim]App audio active: {bundle_id} (PID {app_pid},"
-                    f" {RECORD_RATE} Hz, {app_channels}ch)[/dim]"
-                )
-                if proctap_has_mic:
-                    console.print("[dim]Mic recording via ProcTap[/dim]")
-            except Exception as e:
-                console.print(
-                    f"[yellow]App audio failed ({type(e).__name__}: {e}),"
-                    " microphone only.[/yellow]"
-                )
-                app_proc = None
-                proctap_has_mic = False
-                mic_wav_path = None
-
-    # ── Microphone via sounddevice (only when ProcTap is NOT handling mic) ──
+    # ── Microphone via sounddevice (only when audiotap is NOT handling mic) ──
     mic_rate = app_rate  # match app rate so we can mix without resampling
     mic_stream = None
 
-    if not no_mic and not proctap_has_mic:
+    if not no_mic and not audiotap_has_mic:
 
         def mic_callback(indata, frame_count, time_info, status):
             if not _stop.is_set():
@@ -444,7 +417,7 @@ def record_audio(
                 app_proc.kill()
                 app_proc.wait()
 
-    # ── Parse ProcTap stderr (MIC_DELAY, format info, warnings) ───────
+    # ── Parse audiotap stderr (MIC_DELAY, format info, warnings) ─────
     mic_delay = 0.0
     if app_proc:
         try:
@@ -455,7 +428,7 @@ def record_audio(
                         mic_delay = float(line.split("=", 1)[1])
                         console.print(
                             f"[dim]Stream start delta: {mic_delay:+.3f}s"
-                            " (mic vs app, from ProcTap)[/dim]"
+                            " (mic vs app, from audiotap)[/dim]"
                         )
                     elif (
                         "Audio format:" in line or "WARNING" in line or "ERROR" in line
@@ -489,8 +462,8 @@ def record_audio(
         _save_wav(app_path, audio_app, app_rate)
         console.print(f"[dim]App audio saved: {app_path}[/dim]")
 
-    # Mic track: from ProcTap WAV or sounddevice frames
-    if proctap_has_mic and mic_wav_path and mic_wav_path.exists():
+    # Mic track: from audiotap WAV or sounddevice frames
+    if audiotap_has_mic and mic_wav_path and mic_wav_path.exists():
         if mic_wav_path.stat().st_size > 44:  # WAV header is 44 bytes
             mic_path = mic_wav_path
             console.print(f"[dim]Mic audio saved: {mic_path}[/dim]")
@@ -520,7 +493,7 @@ def record_audio(
                     f"[dim]Mic resampled {mic_rate}→{app_rate} Hz for mix[/dim]"
                 )
         else:
-            console.print("[yellow]Mic WAV from ProcTap is empty.[/yellow]")
+            console.print("[yellow]Mic WAV from audiotap is empty.[/yellow]")
     elif len(audio_mic) > 0:
         mic_path = rec_dir / f"{ts}_mic.wav"
         _save_wav(mic_path, audio_mic, mic_rate)
