@@ -212,7 +212,7 @@ fi
 DMG_NAME="MeetingTranscriber-${VERSION}.dmg"
 DMG_PATH="$BUILD_DIR/$DMG_NAME"
 
-if mkdir -p "$BUILD_DIR" 2>/dev/null; then
+if [ -z "${HOMEBREW_TEMP:-}" ]; then
     echo ""
     echo "Step 8: Creating DMG..."
 
