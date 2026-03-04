@@ -163,6 +163,16 @@ find "$PYTHON_ENV" -name "*.pyc" -delete 2>/dev/null || true
 # Remove Python static library (not needed for embedding)
 rm -f "$PYTHON_ENV"/lib/libpython*.a
 
+# Remove Tcl/Tk (not needed, causes Homebrew dylib warnings)
+rm -rf "$PYTHON_ENV"/lib/itcl*
+rm -rf "$PYTHON_ENV"/lib/tdbc*
+rm -rf "$PYTHON_ENV"/lib/tcl*
+rm -rf "$PYTHON_ENV"/lib/tk*
+rm -rf "$PYTHON_ENV"/lib/libtcl*
+rm -rf "$PYTHON_ENV"/lib/libtk*
+rm -rf "$PYTHON_ENV"/lib/pkgconfig/tcl*.pc
+rm -rf "$PYTHON_ENV"/lib/pkgconfig/tk*.pc
+
 # Remove share/man docs
 rm -rf "$PYTHON_ENV/share"
 
