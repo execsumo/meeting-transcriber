@@ -381,7 +381,30 @@ class AppAudioCapture {
                 ])
         }
         aggregateID = newAggregateID
-        fputs("Created aggregate device: \(aggregateID)\n", stderr)
+
+        // Query actual sample rate of the aggregate device
+        var actualRate: Float64 = 0
+        var rateAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var rateSize = UInt32(MemoryLayout<Float64>.size)
+        AudioObjectGetPropertyData(aggregateID, &rateAddress, 0, nil, &rateSize, &actualRate)
+        let actualSampleRate = Int(actualRate)
+        fputs("Created aggregate device: \(aggregateID) (actual rate: \(actualSampleRate) Hz)\n", stderr)
+
+        // If the aggregate device rate differs from requested, force it
+        if actualSampleRate != sampleRate && actualRate > 0 {
+            var desiredRate = Float64(sampleRate)
+            let setStatus = AudioObjectSetPropertyData(
+                aggregateID, &rateAddress, 0, nil,
+                UInt32(MemoryLayout<Float64>.size), &desiredRate)
+            if setStatus == noErr {
+                fputs("App audio: forced aggregate device rate to \(sampleRate) Hz\n", stderr)
+            } else {
+                fputs("App audio: WARNING could not set rate to \(sampleRate) Hz (status: \(setStatus))\n", stderr)
+            }
+        }
 
         // Set up IOProc to read audio data and write to stdout
         var newProcID: AudioDeviceIOProcID?
@@ -397,7 +420,7 @@ class AppAudioCapture {
                 self.appFirstFrameTime = mach_absolute_time()
                 let frames = Int(abl.mBuffers.mDataByteSize) / MemoryLayout<Float>.size
                 fputs(
-                    "Audio format: \(self.sampleRate) Hz, \(abl.mNumberBuffers) buffers, \(frames) frames/buffer\n",
+                    "Audio format: \(actualSampleRate) Hz actual, \(abl.mNumberBuffers) buffers, \(frames) frames/buffer\n",
                     stderr)
             }
 
