@@ -126,6 +126,10 @@ struct MeetingTranscriberApp: App {
                 if !axOK {
                     print("Warning: Accessibility access not granted — mute detection disabled")
                 }
+                // Pre-load WhisperKit model if native transcription selected
+                if settings.transcriptionEngine == .whisperKit {
+                    await nativeTranscription.engine.loadModel()
+                }
                 await MainActor.run {
                     monitor.start()
                     pythonProcess.start(arguments: settings.buildArguments())
