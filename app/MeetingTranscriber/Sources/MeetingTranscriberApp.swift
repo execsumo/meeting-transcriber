@@ -19,6 +19,23 @@ struct MeetingTranscriberApp: App {
         // Always monitor status file so the app reacts to external
         // transcriber processes (e.g. speaker naming requests).
         monitor.start()
+
+        // Auto-restart Python process on unexpected termination
+        NotificationCenter.default.addObserver(
+            forName: PythonProcess.unexpectedTermination,
+            object: nil,
+            queue: .main
+        ) { [pythonProcess, settings] notification in
+            let crashLoop = notification.userInfo?["crashLoop"] as? Bool ?? false
+            if crashLoop {
+                NSLog("Python process crash loop detected — not restarting")
+                return
+            }
+            NSLog("Python process terminated unexpectedly — restarting in 2s")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                pythonProcess.start(arguments: settings.buildArguments())
+            }
+        }
     }
 
     var body: some Scene {
