@@ -407,7 +407,8 @@ class AppAudioCapture {
                 self.actualSampleRate = Int(actualRate)
                 fputs("App audio: forced rate to \(sampleRate) Hz (actual: \(self.actualSampleRate) Hz)\n", stderr)
             } else {
-                fputs("App audio: WARNING could not set rate to \(sampleRate) Hz (status: \(setStatus))\n", stderr)
+                self.actualSampleRate = actualSampleRate
+                fputs("App audio: WARNING could not set rate to \(sampleRate) Hz, using \(actualSampleRate) Hz (status: \(setStatus))\n", stderr)
             }
         }
 
