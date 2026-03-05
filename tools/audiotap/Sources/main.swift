@@ -282,6 +282,8 @@ class AppAudioCapture {
 
     /// mach_absolute_time() of first audio callback
     var appFirstFrameTime: UInt64 = 0
+    /// Actual sample rate of the aggregate device (may differ from requested)
+    private(set) var actualSampleRate: Int = 0
     private var didLogFormat = false
 
     init(pid: pid_t, sampleRate: Int = 48000, channels: Int = 2) {
@@ -400,7 +402,10 @@ class AppAudioCapture {
                 aggregateID, &rateAddress, 0, nil,
                 UInt32(MemoryLayout<Float64>.size), &desiredRate)
             if setStatus == noErr {
-                fputs("App audio: forced aggregate device rate to \(sampleRate) Hz\n", stderr)
+                // Re-query to confirm
+                AudioObjectGetPropertyData(aggregateID, &rateAddress, 0, nil, &rateSize, &actualRate)
+                self.actualSampleRate = Int(actualRate)
+                fputs("App audio: forced rate to \(sampleRate) Hz (actual: \(self.actualSampleRate) Hz)\n", stderr)
             } else {
                 fputs("App audio: WARNING could not set rate to \(sampleRate) Hz (status: \(setStatus))\n", stderr)
             }
@@ -648,6 +653,11 @@ struct AudioTap {
 
             handler.stop()
             micHandler?.stop()
+
+            // Report actual sample rate so Python can save WAV correctly
+            if handler.actualSampleRate > 0 && handler.actualSampleRate != sampleRate {
+                fputs("ACTUAL_RATE=\(handler.actualSampleRate)\n", stderr)
+            }
 
             if let mic = micHandler {
                 let appTime = handler.appFirstFrameTime

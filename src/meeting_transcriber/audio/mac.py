@@ -483,8 +483,9 @@ def record_audio(
                 app_proc.kill()
                 app_proc.wait()
 
-    # ── Parse audiotap stderr (MIC_DELAY, format info, warnings) ─────
+    # ── Parse audiotap stderr (MIC_DELAY, ACTUAL_RATE, format info, warnings) ──
     mic_delay = 0.0
+    actual_app_rate = app_rate
     if app_proc:
         try:
             stderr_out = app_proc.stderr.read().decode("utf-8", errors="ignore")
@@ -495,6 +496,12 @@ def record_audio(
                         console.print(
                             f"[dim]Stream start delta: {mic_delay:+.3f}s"
                             " (mic vs app, from audiotap)[/dim]"
+                        )
+                    elif line.startswith("ACTUAL_RATE="):
+                        actual_app_rate = int(line.split("=", 1)[1])
+                        console.print(
+                            f"[yellow]App audio actual rate: {actual_app_rate} Hz"
+                            f" (requested {app_rate} Hz)[/yellow]"
                         )
                     elif (
                         "Audio format:" in line or "WARNING" in line or "ERROR" in line
@@ -525,8 +532,19 @@ def record_audio(
     mic_path: Path | None = None
     if len(audio_app) > 0:
         app_path = rec_dir / f"{ts}_app.wav"
-        _save_wav(app_path, audio_app, app_rate)
-        console.print(f"[dim]App audio saved: {app_path}[/dim]")
+        _save_wav(app_path, audio_app, actual_app_rate)
+        console.print(f"[dim]App audio saved: {app_path} ({actual_app_rate} Hz)[/dim]")
+        # Resample app audio to target rate if device rate differs
+        if actual_app_rate != app_rate:
+            from math import gcd
+
+            from scipy.signal import resample_poly
+
+            g = gcd(app_rate, actual_app_rate)
+            audio_app = resample_poly(audio_app, app_rate // g, actual_app_rate // g)
+            console.print(
+                f"[dim]App resampled {actual_app_rate}→{app_rate} Hz for mix[/dim]"
+            )
 
     # Mic track: from audiotap WAV or sounddevice frames
     if audiotap_has_mic and mic_wav_path and mic_wav_path.exists():
