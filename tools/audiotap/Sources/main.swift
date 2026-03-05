@@ -260,6 +260,7 @@ class MicCaptureHandler {
 
 /// Captures app audio via CATapDescription (macOS 14.2+, CoreAudio).
 /// No Screen Recording permission needed — only Audio Capture.
+/// Monitors default output device changes and recreates the tap when needed.
 @available(macOS 14.2, *)
 class AppAudioCapture {
     private let pid: pid_t
@@ -269,8 +270,15 @@ class AppAudioCapture {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var isRunning = false
+    private var outputListenerInstalled = false
     private let writeQueue = DispatchQueue(
         label: "audiotap.writer", qos: .userInteractive)
+
+    /// CoreAudio property address for default output device changes.
+    private var defaultOutputAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
 
     /// mach_absolute_time() of first audio callback
     var appFirstFrameTime: UInt64 = 0
@@ -306,6 +314,11 @@ class AppAudioCapture {
     }
 
     func start() throws {
+        try startCapture()
+        installOutputDeviceChangeListener()
+    }
+
+    private func startCapture() throws {
         let processObjectID = try translatePID()
         fputs("Process audio object ID: \(processObjectID)\n", stderr)
 
@@ -421,21 +434,66 @@ class AppAudioCapture {
         fputs("Audio capture started (CATapDescription, PID \(pid))\n", stderr)
     }
 
-    func stop() {
+    private func installOutputDeviceChangeListener() {
+        guard !outputListenerInstalled else { return }
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultOutputAddress,
+            DispatchQueue.main
+        ) { [weak self] _, _ in
+            self?.handleOutputDeviceChanged()
+        }
+        if status == noErr {
+            outputListenerInstalled = true
+            fputs("App audio: listening for default output device changes\n", stderr)
+        }
+    }
+
+    private func handleOutputDeviceChanged() {
         guard isRunning else { return }
+        fputs("App audio: default output device changed, recreating tap...\n", stderr)
+
+        // Tear down existing capture
+        stopCapture()
+
+        // Recreate with new output device
+        do {
+            try startCapture()
+            fputs("App audio: tap restarted on new output device\n", stderr)
+        } catch {
+            fputs("ERROR: Failed to restart app audio capture: \(error)\n", stderr)
+        }
+    }
+
+    private func stopCapture() {
         isRunning = false
 
         if let procID = procID {
             AudioDeviceStop(aggregateID, procID)
             AudioDeviceDestroyIOProcID(aggregateID, procID)
+            self.procID = nil
         }
         if aggregateID != kAudioObjectUnknown {
             AudioHardwareDestroyAggregateDevice(aggregateID)
+            aggregateID = AudioObjectID(kAudioObjectUnknown)
         }
         if tapID != kAudioObjectUnknown {
             AudioHardwareDestroyProcessTap(tapID)
+            tapID = AudioObjectID(kAudioObjectUnknown)
         }
+        didLogFormat = false
+    }
 
+    func stop() {
+        stopCapture()
+        if outputListenerInstalled {
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &defaultOutputAddress,
+                DispatchQueue.main,
+                { _, _ in })
+            outputListenerInstalled = false
+        }
         fputs("Audio capture stopped\n", stderr)
     }
 }
