@@ -2,6 +2,18 @@ import SwiftUI
 
 private let defaults = UserDefaults.standard
 
+enum TranscriptionEngine: String, CaseIterable {
+    case python = "python"
+    case whisperKit = "whisperkit"
+
+    var displayName: String {
+        switch self {
+        case .python: "Whisper (Python)"
+        case .whisperKit: "WhisperKit (Native)"
+        }
+    }
+}
+
 @Observable
 final class AppSettings {
     // MARK: - Apps to Watch
@@ -51,8 +63,25 @@ final class AppSettings {
 
     // MARK: - Transcription
 
+    var transcriptionEngine: TranscriptionEngine = {
+        if let raw = defaults.object(forKey: "transcriptionEngine") as? String,
+           let engine = TranscriptionEngine(rawValue: raw)
+        {
+            return engine
+        }
+        return .python
+    }() {
+        didSet { defaults.set(transcriptionEngine.rawValue, forKey: "transcriptionEngine") }
+    }
+
     var whisperModel: String = defaults.object(forKey: "whisperModel") as? String ?? "large-v3-turbo-q5_0" {
         didSet { defaults.set(whisperModel, forKey: "whisperModel") }
+    }
+
+    var whisperKitModel: String = defaults.object(forKey: "whisperKitModel") as? String
+        ?? "openai_whisper-large-v3-v20240930_turbo"
+    {
+        didSet { defaults.set(whisperKitModel, forKey: "whisperKitModel") }
     }
 
     var diarize: Bool = defaults.object(forKey: "diarize") as? Bool ?? false {
