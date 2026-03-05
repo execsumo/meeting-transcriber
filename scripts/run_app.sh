@@ -11,7 +11,7 @@ export TRANSCRIBER_ROOT
 
 SPM_DIR="$TRANSCRIBER_ROOT/app/MeetingTranscriber"
 BUILD_BINARY="$SPM_DIR/.build/release/MeetingTranscriber"
-APP_BUNDLE="$SPM_DIR/.build/MeetingTranscriber.app"
+APP_BUNDLE="$SPM_DIR/.build/MeetingTranscriber-Dev.app"
 APP_MACOS="$APP_BUNDLE/Contents/MacOS"
 APP_BINARY="$APP_MACOS/MeetingTranscriber"
 INFO_PLIST="$SPM_DIR/Sources/Info.plist"
@@ -25,7 +25,9 @@ fi
 
 # Assemble .app bundle
 mkdir -p "$APP_MACOS"
-cp "$INFO_PLIST" "$APP_BUNDLE/Contents/Info.plist"
+# Use dev bundle identifier to keep permissions separate from release
+sed 's/com\.meetingtranscriber\.app/com.meetingtranscriber.dev/' \
+    "$INFO_PLIST" > "$APP_BUNDLE/Contents/Info.plist"
 cp "$BUILD_BINARY" "$APP_BINARY"
 
 # Code-sign so macOS keeps Screen Recording permission across rebuilds.
