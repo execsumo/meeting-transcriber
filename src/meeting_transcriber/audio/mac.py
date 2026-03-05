@@ -327,20 +327,28 @@ def record_audio(
     mic_stream = None
 
     if not no_mic and not audiotap_has_mic:
+        _mic_restart_needed = threading.Event()
 
         def mic_callback(indata, frame_count, time_info, status):
+            if status:
+                log.warning("Mic stream status: %s", status)
+                _mic_restart_needed.set()
             if not _stop.is_set():
                 frames_mic.append(indata[:, 0].copy())
 
-        mic_stream = sd.InputStream(
-            samplerate=mic_rate,
-            channels=1,
-            dtype="float32",
-            callback=mic_callback,
-            blocksize=1024,
-            device=mic_device,
-        )
-        mic_stream.start()
+        def _open_mic_stream(device=mic_device):
+            s = sd.InputStream(
+                samplerate=mic_rate,
+                channels=1,
+                dtype="float32",
+                callback=mic_callback,
+                blocksize=1024,
+                device=device,
+            )
+            s.start()
+            return s
+
+        mic_stream = _open_mic_stream()
 
         # Validate actual sample rate matches requested rate
         actual_rate = mic_stream.samplerate
@@ -380,6 +388,39 @@ def record_audio(
     import time as _time
 
     recording_start = _time.monotonic()
+
+    def _mic_restart_loop():
+        """Background thread: restart mic stream when device changes."""
+        nonlocal mic_stream
+        while not _stop.is_set():
+            if _mic_restart_needed.wait(timeout=0.5):
+                if _stop.is_set():
+                    break
+                _mic_restart_needed.clear()
+                try:
+                    mic_stream.stop()
+                    mic_stream.close()
+                except Exception:
+                    pass
+                try:
+                    # Re-open with system default device
+                    mic_stream = _open_mic_stream(device=None)
+                    new_dev = sd.query_devices(sd.default.device[0])["name"]
+                    console.print(
+                        f"[yellow]Mic device changed → restarted on: {new_dev}[/yellow]"
+                    )
+                except Exception as exc:
+                    log.error("Failed to restart mic stream: %s", exc)
+                    console.print(
+                        f"[red]Mic stream lost (device change): {exc}[/red]"
+                    )
+
+    if mic_stream is not None:
+        _mic_watcher = threading.Thread(
+            target=_mic_restart_loop, daemon=True, name="mic-restart"
+        )
+        _mic_watcher.start()
+
     try:
         if stop_event is None:
             # Interactive mode: user presses Enter to stop
@@ -502,6 +543,24 @@ def record_audio(
         mic_path = rec_dir / f"{ts}_mic.wav"
         _save_wav(mic_path, audio_mic, mic_rate)
         console.print(f"[dim]Mic audio saved: {mic_path}[/dim]")
+
+    # ── Warn if mic track is suspiciously short/empty ────────────────────
+    if len(audio_app) > 0:
+        app_dur = len(audio_app) / app_rate
+        mic_dur = len(audio_mic) / app_rate if len(audio_mic) > 0 else 0.0
+        if mic_dur < 1.0:
+            console.print(
+                "[bold red]Warning: Mic track is empty!"
+                " Your voice will NOT appear in the transcript."
+                " Check if your audio device changed during recording.[/bold red]"
+            )
+        elif app_dur > 10.0 and mic_dur < app_dur * 0.1:
+            console.print(
+                f"[bold yellow]Warning: Mic track ({mic_dur:.0f}s) is much shorter"
+                f" than app audio ({app_dur:.0f}s)."
+                " Parts of your voice may be missing — did the audio device"
+                " change during recording?[/bold yellow]"
+            )
 
     # Mix (resample above ensures both streams are at app_rate)
     min_len = min(len(audio_mic), len(audio_app))
