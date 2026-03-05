@@ -101,9 +101,25 @@ struct SettingsView: View {
             }
 
             Section("Transcription") {
-                Picker("Whisper Model", selection: $settings.whisperModel) {
-                    ForEach(whisperModels, id: \.self) { model in
-                        Text(model).tag(model)
+                Picker("Engine", selection: $settings.transcriptionEngine) {
+                    ForEach(TranscriptionEngine.allCases, id: \.self) { engine in
+                        Text(engine.displayName).tag(engine)
+                    }
+                }
+
+                if settings.transcriptionEngine == .python {
+                    Picker("Whisper Model", selection: $settings.whisperModel) {
+                        ForEach(whisperModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text("WhisperKit Model")
+                        Spacer()
+                        TextField("Model variant", text: $settings.whisperKitModel)
+                            .frame(width: 200)
+                            .multilineTextAlignment(.trailing)
                     }
                 }
 
@@ -182,7 +198,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: settings.diarize ? 680 : (settings.noMic ? 460 : 560))
+        .frame(width: 420, height: settings.diarize ? 710 : (settings.noMic ? 490 : 590))
         .onAppear {
             hasToken = settings.hasHFToken
             refreshPermissions()
