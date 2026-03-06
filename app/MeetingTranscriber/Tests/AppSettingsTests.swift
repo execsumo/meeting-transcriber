@@ -9,11 +9,10 @@ final class AppSettingsTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        // Clean UserDefaults keys before each test
         let keys = [
             "watchTeams", "watchZoom", "watchWebex",
             "pollInterval", "endGrace", "noMic", "micDeviceUID", "micName",
-            "whisperModel", "diarize", "numSpeakers", "transcriptionEngine",
+            "diarize", "numSpeakers", "whisperKitModel",
         ]
         for key in keys {
             UserDefaults.standard.removeObject(forKey: key)
@@ -33,7 +32,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(settings.noMic)
         XCTAssertEqual(settings.micName, "Me")
         XCTAssertFalse(settings.diarize)
-        XCTAssertEqual(settings.whisperModel, "large-v3-turbo-q5_0")
+        XCTAssertEqual(settings.whisperKitModel, "openai_whisper-large-v3-v20240930_turbo")
     }
 
     // MARK: - Clamping
@@ -113,45 +112,11 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.watchApps, [])
     }
 
-    // MARK: - buildArguments
+    // MARK: - WhisperKit Model
 
-    func testBuildArgumentsDefaults() {
-        // Default engine is WhisperKit → --native-transcription
-        let args = settings.buildArguments()
-        XCTAssertEqual(args, ["--watch", "--native-transcription"])
-    }
-
-    func testBuildArgumentsCustomPollInterval() {
-        settings.pollInterval = 5.0
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--poll-interval"))
-        XCTAssertTrue(args.contains("5.0"))
-    }
-
-    func testBuildArgumentsNoMic() {
-        settings.noMic = true
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--no-mic"))
-    }
-
-    func testBuildArgumentsMicNameDefault() {
-        // Default "Me" → no --mic-name flag
-        let args = settings.buildArguments()
-        XCTAssertFalse(args.contains("--mic-name"))
-    }
-
-    func testBuildArgumentsMicNameCustom() {
-        settings.micName = "Roman"
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--mic-name"))
-        XCTAssertTrue(args.contains("Roman"))
-    }
-
-    func testBuildArgumentsMicNameEmpty() {
-        settings.micName = ""
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--mic-name"))
-        XCTAssertTrue(args.contains(""))
+    func testWhisperKitModelSavedToDefaults() {
+        settings.whisperKitModel = "openai_whisper-small"
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "whisperKitModel"), "openai_whisper-small")
     }
 
     func testMicNameSavedToDefaults() {
@@ -159,152 +124,21 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(UserDefaults.standard.string(forKey: "micName"), "Roman")
     }
 
-    func testBuildArgumentsDiarize() {
-        settings.transcriptionEngine = .python
-        settings.diarize = true
-        settings.numSpeakers = 4
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--diarize"))
-        XCTAssertTrue(args.contains("--speakers"))
-        XCTAssertTrue(args.contains("4"))
-    }
-
-    func testBuildArgumentsSubsetApps() {
-        settings.watchTeams = false
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--watch-apps"))
-        XCTAssertTrue(args.contains("Zoom"))
-        XCTAssertTrue(args.contains("Webex"))
-        XCTAssertFalse(args.contains("Microsoft Teams"))
-    }
-
-    func testBuildArgumentsAllAppsOmitsFlag() {
-        // All 3 apps enabled → no --watch-apps flag needed
-        let args = settings.buildArguments()
-        XCTAssertFalse(args.contains("--watch-apps"))
-    }
-
-    func testBuildArgumentsNoMicSuppressesMicDevice() {
-        // When noMic=true, --mic-device should NOT appear even if UID is set
-        settings.noMic = true
-        settings.micDeviceUID = "BuiltInMicrophoneDevice"
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--no-mic"))
-        XCTAssertFalse(args.contains("--mic-device"))
-    }
-
-    func testBuildArgumentsMicDeviceWithoutNoMic() {
-        settings.noMic = false
-        settings.micDeviceUID = "BuiltInMicrophoneDevice"
-        let args = settings.buildArguments()
-        XCTAssertFalse(args.contains("--no-mic"))
-        XCTAssertTrue(args.contains("--mic-device"))
-        XCTAssertTrue(args.contains("BuiltInMicrophoneDevice"))
-    }
-
-    func testBuildArgumentsEmptyMicDeviceOmitsFlag() {
-        settings.noMic = false
-        settings.micDeviceUID = ""
-        let args = settings.buildArguments()
-        XCTAssertFalse(args.contains("--mic-device"))
-    }
-
-    func testBuildArgumentsDiarizeFalseIgnoresNumSpeakers() {
-        settings.diarize = false
-        settings.numSpeakers = 4
-        let args = settings.buildArguments()
-        XCTAssertFalse(args.contains("--diarize"))
-        XCTAssertFalse(args.contains("--speakers"))
-        XCTAssertFalse(args.contains("4"))
-    }
-
-    func testBuildArgumentsDiarizeWithAutoDetect() {
-        settings.transcriptionEngine = .python
-        settings.diarize = true
-        settings.numSpeakers = 0
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--diarize"))
-        XCTAssertFalse(args.contains("--speakers"))
-    }
-
-    func testBuildArgumentsAllCustomPythonMode() {
-        settings.transcriptionEngine = .python
-        settings.watchTeams = true
-        settings.watchZoom = false
-        settings.watchWebex = false
-        settings.pollInterval = 10.0
-        settings.endGrace = 30.0
-        settings.noMic = false
-        settings.micDeviceUID = "USB-Mic-42"
-        settings.micName = "Roman"
-        settings.whisperModel = "tiny"
-        settings.diarize = true
-        settings.numSpeakers = 3
-        let args = settings.buildArguments()
-
-        XCTAssertTrue(args.contains("--watch"))
-        XCTAssertTrue(args.contains("--watch-apps"))
-        XCTAssertTrue(args.contains("Microsoft Teams"))
-        XCTAssertTrue(args.contains("--poll-interval"))
-        XCTAssertTrue(args.contains("10.0"))
-        XCTAssertTrue(args.contains("--end-grace"))
-        XCTAssertTrue(args.contains("30.0"))
-        XCTAssertTrue(args.contains("--mic-device"))
-        XCTAssertTrue(args.contains("USB-Mic-42"))
-        XCTAssertTrue(args.contains("--mic-name"))
-        XCTAssertTrue(args.contains("Roman"))
-        XCTAssertTrue(args.contains("--model"))
-        XCTAssertTrue(args.contains("tiny"))
-        XCTAssertTrue(args.contains("--diarize"))
-        XCTAssertTrue(args.contains("--speakers"))
-        XCTAssertTrue(args.contains("3"))
-        XCTAssertFalse(args.contains("--no-mic"))
-    }
-
-    func testBuildArgumentsNoAppsOmitsWatchApps() {
-        settings.watchTeams = false
-        settings.watchZoom = false
-        settings.watchWebex = false
-        let args = settings.buildArguments()
-        // 0 apps → no --watch-apps flag (empty list)
-        XCTAssertFalse(args.contains("--watch-apps"))
-    }
-
-    func testBuildArgumentsCustomWhisperModel() {
-        settings.transcriptionEngine = .python
-        settings.whisperModel = "small"
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--model"))
-        XCTAssertTrue(args.contains("small"))
-    }
-
-    func testBuildArgumentsCustomEndGrace() {
-        settings.endGrace = 60.0
-        let args = settings.buildArguments()
-        XCTAssertTrue(args.contains("--end-grace"))
-        XCTAssertTrue(args.contains("60.0"))
-    }
-
     // MARK: - HF Token (Keychain)
 
     func testKeychainRoundTrip() {
-        // Clean up from any previous test run
         KeychainHelper.delete(key: "HF_TOKEN_TEST")
 
-        // Initially empty
         XCTAssertFalse(KeychainHelper.exists(key: "HF_TOKEN_TEST"))
         XCTAssertNil(KeychainHelper.read(key: "HF_TOKEN_TEST"))
 
-        // Save
         KeychainHelper.save(key: "HF_TOKEN_TEST", value: "hf_abc123")
         XCTAssertTrue(KeychainHelper.exists(key: "HF_TOKEN_TEST"))
         XCTAssertEqual(KeychainHelper.read(key: "HF_TOKEN_TEST"), "hf_abc123")
 
-        // Overwrite
         KeychainHelper.save(key: "HF_TOKEN_TEST", value: "hf_xyz789")
         XCTAssertEqual(KeychainHelper.read(key: "HF_TOKEN_TEST"), "hf_xyz789")
 
-        // Delete
         KeychainHelper.delete(key: "HF_TOKEN_TEST")
         XCTAssertFalse(KeychainHelper.exists(key: "HF_TOKEN_TEST"))
         XCTAssertNil(KeychainHelper.read(key: "HF_TOKEN_TEST"))
@@ -315,7 +149,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(settings.hasHFToken)
         XCTAssertEqual(settings.hfToken, "hf_test_token")
 
-        // Clean up
         settings.setHFToken("")
         XCTAssertFalse(settings.hasHFToken)
         XCTAssertNil(settings.hfToken)
@@ -325,7 +158,6 @@ final class AppSettingsTests: XCTestCase {
         settings.setHFToken("  hf_trimmed  \n")
         XCTAssertEqual(settings.hfToken, "hf_trimmed")
 
-        // Clean up
         settings.setHFToken("")
     }
 }

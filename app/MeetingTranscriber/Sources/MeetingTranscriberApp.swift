@@ -2,57 +2,26 @@ import SwiftUI
 
 @main
 struct MeetingTranscriberApp: App {
-    @State private var monitor = StatusMonitor()
     @State private var settings = AppSettings()
     @State private var speakerRequest: SpeakerRequest?
     @State private var speakerCountRequest: SpeakerCountRequest?
     @State private var watchLoop: WatchLoop?
     @Environment(\.openWindow) private var openWindow
-    private let pythonProcess = PythonProcess()
     private let notifications = NotificationManager.shared
     private let ipc = IPCManager()
 
-    /// Whether the native Swift pipeline is active (vs Python).
-    private var isNativeMode: Bool {
-        settings.transcriptionEngine == .whisperKit
-    }
-
-    /// Whether any watching mode is active.
     private var isWatching: Bool {
-        if isNativeMode {
-            return watchLoop?.isActive == true
-        }
-        return pythonProcess.isRunning
+        watchLoop?.isActive == true
     }
 
     init() {
         notifications.setUp()
-        // Monitor status file for Python-mode state and speaker naming IPC
-        monitor.start()
-
-        // Auto-restart Python process on unexpected termination (Python mode only)
-        NotificationCenter.default.addObserver(
-            forName: PythonProcess.unexpectedTermination,
-            object: nil,
-            queue: .main
-        ) { [pythonProcess, settings] notification in
-            guard settings.transcriptionEngine == .python else { return }
-            let crashLoop = notification.userInfo?["crashLoop"] as? Bool ?? false
-            if crashLoop {
-                NSLog("Python process crash loop detected — not restarting")
-                return
-            }
-            NSLog("Python process terminated unexpectedly — restarting in 2s")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                pythonProcess.start(arguments: settings.buildArguments())
-            }
-        }
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuBarView(
-                status: nativeStatus ?? monitor.status,
+                status: currentStatus,
                 isWatching: isWatching,
                 onStartStop: toggleWatching,
                 onOpenLastProtocol: openLastProtocol,
@@ -73,25 +42,6 @@ struct MeetingTranscriberApp: App {
                 currentStateLabel,
                 systemImage: currentStateIcon
             )
-        }
-        .onChange(of: monitor.status?.state) { oldValue, newValue in
-            // Python mode state changes
-            guard !isNativeMode else { return }
-            guard let newValue, let status = monitor.status else { return }
-            NSLog("State change: \(oldValue?.rawValue ?? "nil") → \(newValue.rawValue)")
-            notifications.handleTransition(from: oldValue, to: newValue, status: status)
-
-            if newValue == .waitingForSpeakerCount {
-                loadSpeakerCountRequest()
-                NSApp.activate()
-                openWindow(id: "speaker-count")
-            }
-
-            if newValue == .waitingForSpeakerNames {
-                loadSpeakerRequest()
-                NSApp.activate()
-                openWindow(id: "speaker-naming")
-            }
         }
 
         Window("Name Speakers", id: "speaker-naming") {
@@ -126,10 +76,9 @@ struct MeetingTranscriberApp: App {
         .windowResizability(.contentSize)
     }
 
-    // MARK: - Native Mode Status Bridge
+    // MARK: - Status
 
-    /// Build a TranscriberStatus from WatchLoop state for the UI.
-    private var nativeStatus: TranscriberStatus? {
+    private var currentStatus: TranscriberStatus? {
         guard let loop = watchLoop, loop.isActive else { return nil }
 
         let meeting: MeetingInfo? = loop.currentMeeting.map {
@@ -154,45 +103,36 @@ struct MeetingTranscriberApp: App {
     }
 
     private var currentStateLabel: String {
-        if isNativeMode, let loop = watchLoop, loop.isActive {
+        if let loop = watchLoop, loop.isActive {
             return loop.transcriberState.label
         }
-        return monitor.status?.state.label ?? "Idle"
+        return "Idle"
     }
 
     private var currentStateIcon: String {
-        if isNativeMode, let loop = watchLoop, loop.isActive {
+        if let loop = watchLoop, loop.isActive {
             return loop.transcriberState.icon
         }
-        return monitor.status?.state.icon ?? "waveform.circle"
+        return "waveform.circle"
     }
 
     // MARK: - Start / Stop
 
     private func toggleWatching() {
-        if isNativeMode {
-            toggleNativeWatching()
-        } else {
-            togglePythonWatching()
-        }
-    }
-
-    private func toggleNativeWatching() {
         if let loop = watchLoop, loop.isActive {
             loop.stop()
             watchLoop = nil
         } else {
             Task {
-                let micOK = await PythonProcess.ensureMicrophoneAccess()
+                let micOK = await Permissions.ensureMicrophoneAccess()
                 if !micOK {
                     NSLog("Warning: Microphone access denied — recording without mic")
                 }
-                let axOK = PythonProcess.ensureAccessibilityAccess()
+                let axOK = Permissions.ensureAccessibilityAccess()
                 if !axOK {
                     NSLog("Warning: Accessibility access not granted — mute detection disabled")
                 }
 
-                // Build patterns from settings
                 var patterns: [AppMeetingPattern] = []
                 if settings.watchTeams { patterns.append(.teams) }
                 if settings.watchZoom { patterns.append(.zoom) }
@@ -216,9 +156,6 @@ struct MeetingTranscriberApp: App {
                     )
 
                     loop.onStateChange = { [notifications] _, newState in
-                        // Send notifications for key state changes
-                        let label = WatchLoop.State.idle  // just to map
-                        _ = label  // suppress warning
                         switch newState {
                         case .recording:
                             if let meeting = loop.currentMeeting {
@@ -248,45 +185,16 @@ struct MeetingTranscriberApp: App {
         }
     }
 
-    private func togglePythonWatching() {
-        if pythonProcess.isRunning {
-            pythonProcess.stop()
-        } else {
-            Task {
-                let micOK = await PythonProcess.ensureMicrophoneAccess()
-                if !micOK {
-                    NSLog("Warning: Microphone access denied — recording without mic")
-                }
-                let axOK = PythonProcess.ensureAccessibilityAccess()
-                if !axOK {
-                    NSLog("Warning: Accessibility access not granted — mute detection disabled")
-                }
-                await MainActor.run {
-                    monitor.start()
-                    pythonProcess.start(arguments: settings.buildArguments())
-                }
-            }
-        }
-    }
-
     // MARK: - Actions
 
     private func openLastProtocol() {
-        if isNativeMode, let path = watchLoop?.lastProtocolPath {
+        if let path = watchLoop?.lastProtocolPath {
             NSWorkspace.shared.open(path)
-        } else if let path = monitor.status?.protocolPath {
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
         }
     }
 
     private func openProtocolsFolder() {
-        let protocols: URL
-        if isNativeMode || pythonProcess.isBundled {
-            protocols = WatchLoop.defaultOutputDir
-        } else {
-            protocols = URL(fileURLWithPath: pythonProcess.projectRoot)
-                .appendingPathComponent("protocols")
-        }
+        let protocols = WatchLoop.defaultOutputDir
         try? FileManager.default.createDirectory(at: protocols, withIntermediateDirectories: true)
         NSWorkspace.shared.open(protocols)
     }
@@ -322,13 +230,6 @@ struct MeetingTranscriberApp: App {
 
     private func quit() {
         watchLoop?.stop()
-        if pythonProcess.isRunning {
-            pythonProcess.stop()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                NSApplication.shared.terminate(nil)
-            }
-        } else {
-            NSApplication.shared.terminate(nil)
-        }
+        NSApplication.shared.terminate(nil)
     }
 }
