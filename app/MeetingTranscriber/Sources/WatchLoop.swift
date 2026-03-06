@@ -135,38 +135,50 @@ class WatchLoop {
         transition(to: .recording)
         detail = "Recording: \(title)"
 
-        // TODO: Start DualSourceRecorder here
-        // For now, we record via audiotap as a Process
-        let recordingDir = FileManager.default.temporaryDirectory
-        let mixPath = recordingDir.appendingPathComponent("mix_\(UUID().uuidString).wav")
+        let recorder = DualSourceRecorder()
+        try recorder.start(
+            appPID: meeting.windowPID,
+            noMic: noMic,
+            micDeviceUID: nil
+        )
+
+        // Read participants (Teams)
+        if meeting.pattern.appName == "Microsoft Teams",
+           let participants = ParticipantReader.readParticipants(pid: meeting.windowPID),
+           !participants.isEmpty {
+            logger.info("Detected \(participants.count) participants")
+            ParticipantReader.writeParticipants(participants, meetingTitle: title)
+        }
 
         // Wait for meeting to end
         try await waitForMeetingEnd(meeting)
 
-        // TODO: Stop recorder, get RecordingResult
-        // For now, skip actual recording — will be wired in full integration
-
+        // Stop recording
+        let recording = try recorder.stop()
         logger.info("Meeting ended: \(title)")
-
-        guard FileManager.default.fileExists(atPath: mixPath.path) else {
-            logger.warning("No audio recorded, skipping pipeline")
-            lastError = "No audio recorded"
-            transition(to: .error)
-            return
-        }
 
         // --- Transcription ---
         transition(to: .transcribing)
         detail = "Transcribing: \(title)"
 
-        let transcript: String
         // Resample to 16kHz for WhisperKit
-        let resampled = recordingDir.appendingPathComponent("mix_16k.wav")
-        let samples = try AudioMixer.loadWAVAsFloat32(url: mixPath)
+        let resampled = DualSourceRecorder.recordingsDir.appendingPathComponent("mix_16k.wav")
+        let samples = try AudioMixer.loadWAVAsFloat32(url: recording.mixPath)
         let downsampled = AudioMixer.resample(samples, from: 48000, to: 16000)
         try AudioMixer.saveWAV(samples: downsampled, sampleRate: 16000, url: resampled)
 
-        transcript = try await whisperKit.transcribe(audioPath: resampled)
+        let transcript: String
+        // Use dual-source if we have separate tracks
+        if let appPath = recording.appPath, let micPath = recording.micPath {
+            transcript = try await whisperKit.transcribeDualSource(
+                appAudio: appPath,
+                micAudio: micPath,
+                micDelay: recording.micDelay,
+                micLabel: micLabel
+            )
+        } else {
+            transcript = try await whisperKit.transcribe(audioPath: resampled)
+        }
 
         guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             logger.warning("Empty transcript, skipping protocol generation")
