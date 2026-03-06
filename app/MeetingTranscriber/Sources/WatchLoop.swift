@@ -13,6 +13,7 @@ class WatchLoop {
         case watching
         case recording
         case transcribing
+        case diarizing
         case generatingProtocol
         case done
         case error
@@ -252,6 +253,7 @@ class WatchLoop {
             let diarizeProcess = diarizationFactory()
             debugWrite("Diarization: available=\(diarizeProcess.isAvailable)")
             if diarizeProcess.isAvailable {
+                transition(to: .diarizing)
                 detail = "Diarizing: \(title)"
                 debugWrite("Running diarization...")
 
@@ -380,6 +382,7 @@ class WatchLoop {
         case .watching: .watching
         case .recording: .recording
         case .transcribing: .transcribing
+        case .diarizing: .transcribing
         case .generatingProtocol: .generatingProtocol
         case .done: .protocolReady
         case .error: .error
