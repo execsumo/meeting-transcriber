@@ -34,7 +34,6 @@ struct MeetingTranscriberApp: App {
         // Auto-watch: schedule on main run loop after app finishes launching
         if CommandLine.arguments.contains("--auto-watch")
             || UserDefaults.standard.bool(forKey: "autoWatch") {
-            NSLog("Auto-watch: scheduling start in 3s")
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                 NotificationCenter.default.post(name: .autoWatchStart, object: nil)
             }
@@ -72,7 +71,6 @@ struct MeetingTranscriberApp: App {
             )
             .onReceive(NotificationCenter.default.publisher(for: .autoWatchStart)) { _ in
                 if !isWatching {
-                    NSLog("Auto-watch: starting via notification")
                     toggleWatching()
                 }
             }
@@ -161,21 +159,13 @@ struct MeetingTranscriberApp: App {
     // MARK: - Start / Stop
 
     private func toggleWatching() {
-        NSLog("toggleWatching called, isWatching=\(isWatching)")
         if let loop = watchLoop, loop.isActive {
-            NSLog("Stopping watch loop")
             loop.stop()
             watchLoop = nil
         } else {
             Task {
-                let micOK = await Permissions.ensureMicrophoneAccess()
-                if !micOK {
-                    NSLog("Warning: Microphone access denied — recording without mic")
-                }
-                let axOK = Permissions.ensureAccessibilityAccess()
-                if !axOK {
-                    NSLog("Warning: Accessibility access not granted — mute detection disabled")
-                }
+                let _ = await Permissions.ensureMicrophoneAccess()
+                let _ = Permissions.ensureAccessibilityAccess()
 
                 var patterns: [AppMeetingPattern] = []
                 if settings.watchTeams { patterns.append(.teams) }
@@ -187,7 +177,6 @@ struct MeetingTranscriberApp: App {
                     patterns.append(.simulator)
                 }
 
-                NSLog("Creating WatchLoop with patterns: \(patterns.map(\.appName)), diarize=\(settings.diarize)")
                 await MainActor.run {
                     let loop = WatchLoop(
                         detector: MeetingDetector(patterns: patterns),
@@ -265,12 +254,7 @@ struct MeetingTranscriberApp: App {
     }
 
     private func loadSpeakerRequest() {
-        if let request = ipc.loadSpeakerRequest() {
-            NSLog("Speaker naming: loaded \(request.speakers.count) speakers")
-            speakerRequest = request
-        } else {
-            NSLog("Speaker naming: file not found or unreadable")
-        }
+        speakerRequest = ipc.loadSpeakerRequest()
     }
 
     private func loadSpeakerCountRequest() {
