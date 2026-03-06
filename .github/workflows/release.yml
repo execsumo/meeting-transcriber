@@ -9,17 +9,12 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14  # Apple Silicon runner
+    runs-on: macos-26  # Apple Silicon runner (Swift 6.0+)
     permissions:
       contents: write  # For creating GitHub releases
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Swift 6.0
-        uses: swiftlang/setup-swift@v2
-        with:
-          swift-version: "6.0"
 
       - name: Build self-contained .app and DMG
         run: ./scripts/build_release.sh
