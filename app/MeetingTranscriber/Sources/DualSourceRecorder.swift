@@ -46,7 +46,7 @@ class DualSourceRecorder {
         }
 
         // 3. Project-local build
-        if let root = PythonProcess.findProjectRoot(from: nil) {
+        if let root = Permissions.findProjectRoot(from: nil) {
             let local = URL(fileURLWithPath: root)
                 .appendingPathComponent("tools/audiotap/.build/release/audiotap")
             if FileManager.default.isExecutableFile(atPath: local.path) {
