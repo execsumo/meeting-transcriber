@@ -69,12 +69,46 @@ final class DiarizationProcessTests: XCTestCase {
 
     // MARK: - Availability
 
-    func testNotAvailableByDefault() {
+    func testNotAvailableWithNonexistentPaths() {
         let proc = DiarizationProcess(
             pythonPath: URL(fileURLWithPath: "/nonexistent/python"),
             scriptPath: URL(fileURLWithPath: "/nonexistent/diarize.py")
         )
         XCTAssertFalse(proc.isAvailable)
+    }
+
+    func testAvailableWithProjectPaths() {
+        // Verify dev-mode fallback paths exist
+        guard let root = Permissions.findProjectRoot(from: nil) else {
+            // Skip if not running from project (e.g. CI)
+            return
+        }
+        let pythonPath = URL(fileURLWithPath: root).appendingPathComponent(".venv/bin/python")
+        let scriptPath = URL(fileURLWithPath: root).appendingPathComponent("tools/diarize/diarize.py")
+
+        let proc = DiarizationProcess(pythonPath: pythonPath, scriptPath: scriptPath)
+
+        // Both files should exist in the project
+        let pythonExists = FileManager.default.fileExists(atPath: pythonPath.path)
+        let scriptExists = FileManager.default.fileExists(atPath: scriptPath.path)
+        XCTAssertEqual(proc.isAvailable, pythonExists && scriptExists)
+    }
+
+    func testDefaultInitUsesDevFallback() {
+        // When running from project (not bundle), default init should find dev paths
+        let proc = DiarizationProcess()
+        // In test environment, bundle won't have python-diarize,
+        // so it should fall back to project paths if they exist
+        if let root = Permissions.findProjectRoot(from: nil) {
+            let venvExists = FileManager.default.fileExists(
+                atPath: root + "/.venv/bin/python")
+            let scriptExists = FileManager.default.fileExists(
+                atPath: root + "/tools/diarize/diarize.py")
+            if venvExists && scriptExists {
+                XCTAssertTrue(proc.isAvailable,
+                    "DiarizationProcess should be available in dev mode with venv + script")
+            }
+        }
     }
 
     // MARK: - Speaker Assignment
