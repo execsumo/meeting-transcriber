@@ -107,12 +107,17 @@ final class WatchLoopE2ETests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func fixtureURL() -> URL {
+    /// Project root derived from #filePath (works in xctest, unlike Bundle.main).
+    private var projectRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()  // Tests/
             .deletingLastPathComponent()  // MeetingTranscriber/
             .deletingLastPathComponent()  // app/
             .deletingLastPathComponent()  // Transcriber/
+    }
+
+    private func fixtureURL() -> URL {
+        projectRoot
             .appendingPathComponent("tests")
             .appendingPathComponent("fixtures")
             .appendingPathComponent("two_speakers_de.wav")
@@ -522,13 +527,31 @@ final class WatchLoopE2ETests: XCTestCase {
             "Test fixture not found at \(fixture.path)"
         )
 
-        // Check real diarization availability
-        let realDiarize = DiarizationProcess()
-        try XCTSkipUnless(realDiarize.isAvailable, "Diarization not available (python-diarize not found)")
-        try XCTSkipUnless(
-            KeychainHelper.read(key: "HF_TOKEN") != nil,
-            "HF_TOKEN not in Keychain"
-        )
+        // Check real diarization availability using explicit project paths
+        // (Bundle.main in xctest points to Xcode, not the project)
+        let pythonPath = projectRoot.appendingPathComponent(".venv/bin/python")
+        let scriptPath = projectRoot.appendingPathComponent("tools/diarize/diarize.py")
+        let realDiarize = DiarizationProcess(pythonPath: pythonPath, scriptPath: scriptPath)
+        try XCTSkipUnless(realDiarize.isAvailable, "Diarization not available (.venv/bin/python or tools/diarize/diarize.py not found)")
+
+        // HF_TOKEN: try Keychain first, then .env file, then environment
+        var hfToken = KeychainHelper.read(key: "HF_TOKEN")
+            ?? ProcessInfo.processInfo.environment["HF_TOKEN"]
+        if hfToken == nil {
+            // Parse .env file from project root
+            let envFile = projectRoot.appendingPathComponent(".env")
+            if let contents = try? String(contentsOf: envFile, encoding: .utf8) {
+                for line in contents.split(separator: "\n") {
+                    if line.hasPrefix("HF_TOKEN=") {
+                        hfToken = String(line.dropFirst("HF_TOKEN=".count))
+                        // Set it so DiarizationProcess can pick it up via ProcessInfo.environment
+                        setenv("HF_TOKEN", hfToken!, 1)
+                        break
+                    }
+                }
+            }
+        }
+        try XCTSkipUnless(hfToken != nil, "HF_TOKEN not found (Keychain, env var, or .env)")
 
         let mixPath = try prepare48kHzFixture()
 
@@ -548,7 +571,7 @@ final class WatchLoopE2ETests: XCTestCase {
             detector: detector,
             whisperKit: engine,
             recorderFactory: { recorder },
-            diarizationFactory: { DiarizationProcess() },
+            diarizationFactory: { DiarizationProcess(pythonPath: pythonPath, scriptPath: scriptPath) },
             protocolGenerator: mockProtocol,
             pollInterval: 0.05,
             endGracePeriod: 0.1,

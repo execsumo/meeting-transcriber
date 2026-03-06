@@ -111,11 +111,12 @@ class DiarizationProcess: DiarizationProvider {
         process.executableURL = pythonPath
         process.arguments = arguments
 
-        // Set HF_TOKEN from Keychain
+        // Set HF_TOKEN: Keychain first, then fall back to environment variable
         var env = ProcessInfo.processInfo.environment
         if let hfToken = KeychainHelper.read(key: "HF_TOKEN") {
             env["HF_TOKEN"] = hfToken
         }
+        // env already contains HF_TOKEN if set via process environment
         process.environment = env
 
         let stdoutPipe = Pipe()
