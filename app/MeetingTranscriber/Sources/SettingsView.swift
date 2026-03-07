@@ -70,7 +70,7 @@ struct SettingsView: View {
                     TextField("", value: $settings.endGrace, format: .number)
                         .frame(width: 60)
                         .multilineTextAlignment(.trailing)
-                    Stepper("", value: $settings.endGrace, in: 5...120, step: 5)
+                    Stepper("", value: $settings.endGrace, in: 1...120, step: 1)
                         .labelsHidden()
                     Text("seconds")
                         .foregroundStyle(.secondary)

@@ -34,7 +34,7 @@ final class AppSettings {
 
     var endGrace: Double = defaults.object(forKey: "endGrace") as? Double ?? 15.0 {
         didSet {
-            if endGrace < 5.0 { endGrace = 5.0 }
+            if endGrace < 1.0 { endGrace = 1.0 }
             defaults.set(endGrace, forKey: "endGrace")
         }
     }
