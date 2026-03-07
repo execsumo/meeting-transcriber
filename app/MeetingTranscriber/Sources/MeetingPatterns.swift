@@ -43,7 +43,7 @@ extension AppMeetingPattern {
             #"^Files \|"#,
             #"^Assignments \|"#,
             #"^Settings \|"#,
-            #"^Echo \|"#,
+            // Echo test call allowed for testing
         ]
     )
 
