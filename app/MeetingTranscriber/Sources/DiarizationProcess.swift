@@ -175,7 +175,9 @@ class DiarizationProcess: DiarizationProvider {
 
     /// Bridge method satisfying `DiarizationProvider` protocol (fewer parameters).
     func run(audioPath: URL, numSpeakers: Int?, meetingTitle: String) async throws -> DiarizationResult {
-        try await run(audioPath: audioPath, numSpeakers: numSpeakers, expectedNames: [], speakersDB: nil, meetingTitle: meetingTitle)
+        let defaultDB = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/MeetingTranscriber/speakers.json")
+        return try await run(audioPath: audioPath, numSpeakers: numSpeakers, expectedNames: [], speakersDB: defaultDB, meetingTitle: meetingTitle)
     }
 
     /// Assign speaker labels to transcript segments by maximum temporal overlap.
