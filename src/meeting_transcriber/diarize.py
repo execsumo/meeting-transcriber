@@ -500,9 +500,12 @@ def _resolve_hf_token() -> str:
         return token
 
     # 2. Legacy .env file
-    from dotenv import load_dotenv
+    try:
+        from dotenv import load_dotenv
 
-    load_dotenv()
+        load_dotenv()
+    except ImportError:
+        pass
     token = os.environ.get("HF_TOKEN")
     if token:
         return token
