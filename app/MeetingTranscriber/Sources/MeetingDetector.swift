@@ -34,7 +34,7 @@ class MeetingDetector {
     private let confirmationCount: Int
     private var consecutiveHits: [String: Int] = [:]
     private var cooldownUntil: [String: Date] = [:]
-    private let cooldownDuration: TimeInterval = 60  // ignore same app for 60s after meeting
+    private let cooldownDuration: TimeInterval = 5  // brief cooldown to avoid re-detecting the same meeting
 
     /// Pre-compiled regex for each pattern to avoid re-compilation on every poll.
     private let compiledMeetingPatterns: [String: [NSRegularExpression]]
