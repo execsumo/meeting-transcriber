@@ -211,6 +211,13 @@ struct SettingsView: View {
 
             Section("About") {
                 HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(Self.versionString)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                HStack {
                     Text("Build Date")
                     Spacer()
                     Text(Self.buildDate)
@@ -226,6 +233,12 @@ struct SettingsView: View {
             refreshPermissions()
         }
     }
+
+    private static let versionString: String = {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let commit = Bundle.main.infoDictionary?["GitCommitHash"] as? String ?? "dev"
+        return "\(version) (\(commit))"
+    }()
 
     private static let buildDate: String = {
         let fmt = DateFormatter()

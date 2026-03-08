@@ -26,6 +26,12 @@ mkdir -p "$APP_MACOS"
 # Use dev bundle identifier to keep permissions separate from release
 sed 's/com\.meetingtranscriber\.app/com.meetingtranscriber.dev/' \
     "$INFO_PLIST" > "$APP_BUNDLE/Contents/Info.plist"
+
+# Inject git commit hash into Info.plist
+GIT_HASH=$(git -C "$TRANSCRIBER_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+/usr/libexec/PlistBuddy -c "Add :GitCommitHash string $GIT_HASH" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || \
+/usr/libexec/PlistBuddy -c "Set :GitCommitHash $GIT_HASH" "$APP_BUNDLE/Contents/Info.plist"
+
 cp "$BUILD_BINARY" "$APP_BINARY"
 
 # Code-sign so macOS keeps Screen Recording permission across rebuilds.
