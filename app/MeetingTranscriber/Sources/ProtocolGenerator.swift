@@ -135,13 +135,23 @@ struct ProtocolGenerator {
         stdinPipe.fileHandleForWriting.write(promptData)
         stdinPipe.fileHandleForWriting.closeFile()
 
-        // Read stream-json output
+        // Read stream-json output (drains stdout to prevent pipe buffer deadlock)
         let text = try await readStreamJSON(from: stdoutPipe, process: process)
 
-        process.waitUntilExit()
+        // Read stderr in background to prevent pipe buffer issues
+        async let stderrRead = Task.detached {
+            stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        }.value
+
+        // Await process exit without blocking cooperative thread pool
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            process.terminationHandler = { _ in
+                continuation.resume()
+            }
+        }
 
         if process.terminationStatus != 0 {
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderrData = await stderrRead
             let stderrText = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             throw ProtocolError.cliFailed(Int(process.terminationStatus), stderrText)
         }
