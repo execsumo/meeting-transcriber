@@ -38,36 +38,48 @@ final class WhisperKitEngine {
     private(set) var modelState: ModelState = .unloaded
     private(set) var downloadProgress: Double = 0
     private var pipe: WhisperKit?
+    private var loadingTask: Task<Void, Never>?
 
     func loadModel() async {
-        modelState = .downloading
-        downloadProgress = 0
-        do {
-            // Step 1: Download with progress tracking
-            let modelFolder = try await WhisperKit.download(
-                variant: modelVariant,
-                progressCallback: { progress in
-                    Task { @MainActor in
-                        self.downloadProgress = progress.fractionCompleted
-                    }
-                }
-            )
-
-            // Step 2: Init with local model folder (skips download)
-            modelState = .loading
-            downloadProgress = 1.0
-            pipe = try await WhisperKit(
-                WhisperKitConfig(
-                    model: modelVariant,
-                    modelFolder: modelFolder.path()
-                )
-            )
-            modelState = .loaded
-        } catch {
-            NSLog("WhisperKit model load failed: \(error)")
-            modelState = .unloaded
-            downloadProgress = 0
+        // Deduplicate concurrent loads
+        if let existing = loadingTask {
+            await existing.value
+            return
         }
+
+        let task = Task {
+            modelState = .downloading
+            downloadProgress = 0
+            do {
+                // Step 1: Download with progress tracking
+                let modelFolder = try await WhisperKit.download(
+                    variant: modelVariant,
+                    progressCallback: { progress in
+                        Task { @MainActor in
+                            self.downloadProgress = progress.fractionCompleted
+                        }
+                    }
+                )
+
+                // Step 2: Init with local model folder (skips download)
+                modelState = .loading
+                downloadProgress = 1.0
+                pipe = try await WhisperKit(
+                    WhisperKitConfig(
+                        model: modelVariant,
+                        modelFolder: modelFolder.path()
+                    )
+                )
+                modelState = .loaded
+            } catch {
+                NSLog("WhisperKit model load failed: \(error)")
+                modelState = .unloaded
+                downloadProgress = 0
+            }
+            loadingTask = nil
+        }
+        loadingTask = task
+        await task.value
     }
 
     func unloadModel() {
