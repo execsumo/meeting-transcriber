@@ -4,8 +4,6 @@ import XCTest
 @testable import MeetingTranscriber
 
 // MARK: - Tests
-// NOTE: These E2E tests need to be rewritten for the new PipelineQueue architecture (Task 5).
-// They are temporarily updated to compile against the new WatchLoop API.
 
 @MainActor
 final class WatchLoopE2ETests: XCTestCase {
@@ -79,10 +77,29 @@ final class WatchLoopE2ETests: XCTestCase {
         )
     }
 
+    /// Create a PipelineQueue with mocks for E2E testing.
+    private func makeQueue(
+        whisperKit: WhisperKitEngine? = nil,
+        diarization: MockDiarization = MockDiarization(),
+        protocolGen: MockProtocolGen = MockProtocolGen(),
+        diarizeEnabled: Bool = false,
+        micLabel: String = "Roman"
+    ) -> PipelineQueue {
+        PipelineQueue(
+            logDir: tmpDir,
+            whisperKit: whisperKit ?? WhisperKitEngine(),
+            diarizationFactory: { diarization },
+            protocolGenerator: protocolGen,
+            outputDir: tmpDir,
+            diarizeEnabled: diarizeEnabled,
+            micLabel: micLabel
+        )
+    }
+
     /// Create a WatchLoop with injected mocks and immediate meeting-end detection.
     private func makeLoop(
         recorder: MockRecorder,
-        pipelineQueue: PipelineQueue? = nil
+        pipelineQueue: PipelineQueue
     ) -> WatchLoop {
         let detector = MeetingDetector(patterns: AppMeetingPattern.all)
         // Meeting ends immediately (no windows)
@@ -99,32 +116,203 @@ final class WatchLoopE2ETests: XCTestCase {
         )
     }
 
-    // MARK: - 1. Full Pipeline: detect → record → enqueue
-    // TODO: Task 5 — rewrite to test WatchLoop enqueue + PipelineQueue processing
+    // MARK: - 1. Full Pipeline: detect → record → enqueue → transcribe → protocol
 
-    func testFullPipelineDetectRecordTranscribeDiarizeProtocol() async throws {
-        try XCTSkipIf(true, "Pending Task 5: rewrite for PipelineQueue architecture")
+    func testFullPipelineDetectRecordTranscribeProtocol() async throws {
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping in CI: requires WhisperKit model download"
+        )
+
+        let fixture = fixtureURL()
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: fixture.path),
+            "Test fixture not found at \(fixture.path)"
+        )
+
+        let mixPath = try prepare48kHzFixture()
+        let recorder = MockRecorder()
+        recorder.mixPath = mixPath
+
+        let mockProtocol = MockProtocolGen()
+        let engine = WhisperKitEngine()
+        engine.modelVariant = "openai_whisper-small"
+        engine.language = "de"
+
+        let queue = makeQueue(
+            whisperKit: engine,
+            protocolGen: mockProtocol,
+            diarizeEnabled: false
+        )
+        let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
+
+        let meeting = makeMeeting()
+        try await loop.handleMeeting(meeting)
+
+        // Verify recording happened
+        XCTAssertTrue(recorder.startCalled)
+        XCTAssertTrue(recorder.stopCalled)
+
+        // Verify job was enqueued
+        XCTAssertEqual(queue.jobs.count, 1)
+        XCTAssertEqual(queue.jobs[0].state, .waiting)
+
+        // Process the job through the pipeline
+        await queue.processNext()
+
+        // Verify protocol was generated
+        XCTAssertTrue(mockProtocol.generateCalled, "Protocol generator should have been called")
+        XCTAssertEqual(queue.jobs[0].state, .done, "Job should be done after processing")
+        XCTAssertNotNil(queue.jobs[0].protocolPath, "Job should have a protocol path")
+
+        // Verify the transcript was non-empty
+        XCTAssertNotNil(mockProtocol.capturedTranscript, "Transcript should be captured")
+        XCTAssertFalse(
+            mockProtocol.capturedTranscript?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true,
+            "Transcript should not be empty"
+        )
     }
 
     // MARK: - 2. Dual Source Transcription Path
-    // TODO: Task 5 — rewrite to test PipelineQueue dual-source processing
 
     func testDualSourceTranscriptionPath() async throws {
-        try XCTSkipIf(true, "Pending Task 5: rewrite for PipelineQueue architecture")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping in CI: requires WhisperKit model download"
+        )
+
+        let fixture = fixtureURL()
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: fixture.path),
+            "Test fixture not found at \(fixture.path)"
+        )
+
+        // Prepare separate app and mic audio (both 48kHz)
+        let appPath = try prepare48kHzFixture(name: "app.wav")
+        let micPath = try prepare48kHzFixture(name: "mic.wav")
+        let mixPath = try prepare48kHzFixture(name: "mix.wav")
+
+        let recorder = MockRecorder()
+        recorder.mixPath = mixPath
+        recorder.appPath = appPath
+        recorder.micPath = micPath
+
+        let mockProtocol = MockProtocolGen()
+        let engine = WhisperKitEngine()
+        engine.modelVariant = "openai_whisper-small"
+        engine.language = "de"
+
+        let queue = makeQueue(
+            whisperKit: engine,
+            protocolGen: mockProtocol,
+            diarizeEnabled: false,
+            micLabel: "Roman"
+        )
+        let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
+
+        let meeting = makeMeeting()
+        try await loop.handleMeeting(meeting)
+
+        // Verify dual-source paths were stored in the job
+        XCTAssertEqual(queue.jobs.count, 1)
+        XCTAssertNotNil(queue.jobs[0].appPath, "Job should have app audio path")
+        XCTAssertNotNil(queue.jobs[0].micPath, "Job should have mic audio path")
+
+        // Process the job
+        await queue.processNext()
+
+        // Verify protocol was generated with speaker-labeled transcript
+        XCTAssertTrue(mockProtocol.generateCalled, "Protocol generator should have been called")
+        XCTAssertEqual(queue.jobs[0].state, .done, "Job should be done after dual-source processing")
+
+        // Verify transcript contains speaker labels (Roman / Remote)
+        if let transcript = mockProtocol.capturedTranscript {
+            let hasLabels = transcript.contains("Roman") || transcript.contains("Remote")
+            XCTAssertTrue(hasLabels, "Dual-source transcript should contain speaker labels, got: \(transcript.prefix(200))")
+        }
     }
 
     // MARK: - 3. Empty Transcript Transitions to Error
-    // TODO: Task 5 — rewrite to test PipelineQueue error handling
 
     func testEmptyTranscriptTransitionsToError() async throws {
-        try XCTSkipIf(true, "Pending Task 5: rewrite for PipelineQueue architecture")
+        // Create a silent (all zeros) 48kHz WAV — WhisperKit should produce empty transcript
+        let silentSamples = [Float](repeating: 0.0, count: 48000)
+        let mixPath = tmpDir.appendingPathComponent("silent.wav")
+        try AudioMixer.saveWAV(samples: silentSamples, sampleRate: 48000, url: mixPath)
+
+        let recorder = MockRecorder()
+        recorder.mixPath = mixPath
+
+        let engine = WhisperKitEngine()
+        engine.modelVariant = "openai_whisper-small"
+        engine.language = "de"
+
+        let mockProtocol = MockProtocolGen()
+        let queue = makeQueue(
+            whisperKit: engine,
+            protocolGen: mockProtocol,
+            diarizeEnabled: false
+        )
+        let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
+
+        let meeting = makeMeeting()
+        try await loop.handleMeeting(meeting)
+
+        XCTAssertEqual(queue.jobs.count, 1)
+        XCTAssertEqual(queue.jobs[0].state, .waiting)
+
+        // Process the job — should fail with empty transcript
+        await queue.processNext()
+
+        XCTAssertEqual(queue.jobs[0].state, .error, "Job should be in error state for empty transcript")
+        XCTAssertFalse(mockProtocol.generateCalled, "Protocol should NOT be generated for empty transcript")
     }
 
     // MARK: - 4. Diarization Skipped When Not Available
-    // TODO: Task 5 — rewrite to test PipelineQueue diarization skip
 
     func testDiarizationSkippedWhenNotAvailable() async throws {
-        try XCTSkipIf(true, "Pending Task 5: rewrite for PipelineQueue architecture")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping in CI: requires WhisperKit model download"
+        )
+
+        let fixture = fixtureURL()
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: fixture.path),
+            "Test fixture not found at \(fixture.path)"
+        )
+
+        let mixPath = try prepare48kHzFixture()
+        let recorder = MockRecorder()
+        recorder.mixPath = mixPath
+
+        let mockDiarize = MockDiarization()
+        mockDiarize.isAvailable = false  // Simulate diarization not available
+
+        let mockProtocol = MockProtocolGen()
+        let engine = WhisperKitEngine()
+        engine.modelVariant = "openai_whisper-small"
+        engine.language = "de"
+
+        let queue = makeQueue(
+            whisperKit: engine,
+            diarization: mockDiarize,
+            protocolGen: mockProtocol,
+            diarizeEnabled: true  // Enabled but not available
+        )
+        let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
+
+        let meeting = makeMeeting()
+        try await loop.handleMeeting(meeting)
+        await queue.processNext()
+
+        // Protocol should still be generated (diarization skipped gracefully)
+        XCTAssertTrue(mockProtocol.generateCalled, "Protocol should be generated even when diarization is unavailable")
+        XCTAssertEqual(queue.jobs[0].state, .done, "Job should complete despite unavailable diarization")
+        XCTAssertFalse(mockDiarize.runCalled, "Diarization should NOT have been run")
+
+        // Verify the transcript was passed as non-diarized
+        XCTAssertEqual(mockProtocol.capturedDiarized, false, "Should be marked as non-diarized")
     }
 
     // MARK: - 5. Cooldown Prevents Re-detection After Handling
@@ -173,7 +361,7 @@ final class WatchLoopE2ETests: XCTestCase {
         // Create 48kHz version
         let path48k = try prepare48kHzFixture(name: "resample_test.wav")
 
-        // Resample to 16kHz (same path as handleMeeting)
+        // Resample to 16kHz (same path as PipelineQueue)
         let samples48k = try AudioMixer.loadWAVAsFloat32(url: path48k)
         let resampled = AudioMixer.resample(samples48k, from: 48000, to: 16000)
 
@@ -203,10 +391,63 @@ final class WatchLoopE2ETests: XCTestCase {
     }
 
     // MARK: - 7. Full Pipeline With Real Diarization (slow)
-    // TODO: Task 5 — rewrite to test PipelineQueue with real diarization
 
     func testFullPipelineWithRealDiarization() async throws {
-        try XCTSkipIf(true, "Pending Task 5: rewrite for PipelineQueue architecture")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping in CI: requires WhisperKit model + diarization"
+        )
+
+        let fixture = fixtureURL()
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: fixture.path),
+            "Test fixture not found at \(fixture.path)"
+        )
+
+        // Check that diarization is available
+        let realDiarize = DiarizationProcess()
+        try XCTSkipUnless(realDiarize.isAvailable, "Diarization not available (no python-diarize in bundle/venv)")
+
+        // Check HF_TOKEN
+        let hasToken = ProcessInfo.processInfo.environment["HF_TOKEN"] != nil
+        try XCTSkipUnless(hasToken, "HF_TOKEN not set — skipping real diarization test")
+
+        let mixPath = try prepare48kHzFixture()
+        let recorder = MockRecorder()
+        recorder.mixPath = mixPath
+
+        let mockProtocol = MockProtocolGen()
+        let engine = WhisperKitEngine()
+        engine.modelVariant = "openai_whisper-small"
+        engine.language = "de"
+
+        let queue = PipelineQueue(
+            logDir: tmpDir,
+            whisperKit: engine,
+            diarizationFactory: { DiarizationProcess() },
+            protocolGenerator: mockProtocol,
+            outputDir: tmpDir,
+            diarizeEnabled: true,
+            micLabel: "Roman"
+        )
+        let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
+
+        let meeting = makeMeeting()
+        try await loop.handleMeeting(meeting)
+
+        XCTAssertEqual(queue.jobs.count, 1)
+
+        // Process the job (real transcription + real diarization)
+        await queue.processNext()
+
+        // Verify protocol was generated
+        XCTAssertTrue(mockProtocol.generateCalled, "Protocol generator should have been called")
+        XCTAssertEqual(queue.jobs[0].state, .done, "Job should complete with real diarization")
+
+        // Verify transcript contains speaker segments
+        if let transcript = mockProtocol.capturedTranscript {
+            XCTAssertFalse(transcript.isEmpty, "Transcript should not be empty")
+        }
     }
 
     // MARK: - 8. WatchLoop Enqueues Job After Recording
@@ -219,7 +460,7 @@ final class WatchLoopE2ETests: XCTestCase {
         let recorder = MockRecorder()
         recorder.mixPath = mixPath
 
-        let queue = PipelineQueue()
+        let queue = PipelineQueue(logDir: tmpDir)
         let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
 
         let meeting = makeMeeting()
