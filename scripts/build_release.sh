@@ -96,6 +96,11 @@ echo "Step 3: Assembling app bundle..."
 sed "s|<string>1.0</string>|<string>${VERSION}</string>|g" \
     "$SPM_DIR/Sources/Info.plist" > "$CONTENTS/Info.plist"
 
+# Inject git commit hash
+GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+/usr/libexec/PlistBuddy -c "Add :GitCommitHash string $GIT_HASH" "$CONTENTS/Info.plist" 2>/dev/null || \
+/usr/libexec/PlistBuddy -c "Set :GitCommitHash $GIT_HASH" "$CONTENTS/Info.plist"
+
 # ── Step 4 (optional): Build diarization Python venv ─────────────────────────
 
 if [ "$WITH_DIARIZE" = true ]; then
