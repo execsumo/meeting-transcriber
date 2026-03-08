@@ -79,14 +79,12 @@ def load_speaker_db(db_path: Path) -> dict[str, list[float]]:
 
 
 def save_speaker_db(db: dict[str, list[float]], db_path: Path) -> None:
-    """Save speaker embeddings to JSON."""
+    """Save speaker embeddings to JSON (atomic write)."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(db_path, "w", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            json.dump(db, f, indent=2, ensure_ascii=False)
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+    tmp_path = db_path.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, db_path)
 
 
 # ── Similarity ────────────────────────────────────────────────────────────────
