@@ -133,6 +133,21 @@ if [ "$WITH_DIARIZE" = true ]; then
     # Copy standalone diarize script
     cp "$PROJECT_ROOT/tools/diarize/diarize.py" "$DIARIZE_ENV/diarize.py"
 
+    # Replace broken symlinks in venv bin/ with real Python binary
+    # (venv symlinks point to $PYTHON_TMP which gets deleted below)
+    REAL_PYTHON="$PYTHON_TMP/bin/python3.14"
+    for link in "$DIARIZE_ENV/bin/python3" "$DIARIZE_ENV/bin/python" "$DIARIZE_ENV/bin/python3.14"; do
+        if [ -L "$link" ]; then
+            rm "$link"
+            cp "$REAL_PYTHON" "$link"
+        fi
+    done
+    # Fix the unicode alias too
+    if [ -L "$DIARIZE_ENV/bin/𝜋thon" ]; then
+        rm "$DIARIZE_ENV/bin/𝜋thon"
+        cp "$REAL_PYTHON" "$DIARIZE_ENV/bin/𝜋thon"
+    fi
+
     # Clean up temp Python and venv cruft
     rm -rf "$PYTHON_TMP"
     rm -rf "$DIARIZE_ENV"/lib/python*/site-packages/pip
