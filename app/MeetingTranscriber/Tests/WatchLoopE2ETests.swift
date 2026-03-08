@@ -404,12 +404,28 @@ final class WatchLoopE2ETests: XCTestCase {
             "Test fixture not found at \(fixture.path)"
         )
 
+        // Resolve project root from fixture path
+        let projectRoot = fixtureURL()
+            .deletingLastPathComponent()  // fixtures/
+            .deletingLastPathComponent()  // tests/
+            .deletingLastPathComponent()  // Transcriber/
+        let pythonPath = projectRoot.appendingPathComponent(".venv/bin/python")
+        let scriptPath = projectRoot.appendingPathComponent("tools/diarize/diarize.py")
+
         // Check that diarization is available
-        let realDiarize = DiarizationProcess()
+        let realDiarize = DiarizationProcess(pythonPath: pythonPath, scriptPath: scriptPath)
         try XCTSkipUnless(realDiarize.isAvailable, "Diarization not available (no python-diarize in bundle/venv)")
 
-        // Check HF_TOKEN
-        let hasToken = ProcessInfo.processInfo.environment["HF_TOKEN"] != nil
+        // Check HF_TOKEN from .env if not in environment
+        var hasToken = ProcessInfo.processInfo.environment["HF_TOKEN"] != nil
+        if !hasToken {
+            let envPath = projectRoot.appendingPathComponent(".env")
+            if let envContents = try? String(contentsOf: envPath, encoding: .utf8),
+               envContents.contains("HF_TOKEN=") {
+                // Load HF_TOKEN from .env for subprocess
+                hasToken = true
+            }
+        }
         try XCTSkipUnless(hasToken, "HF_TOKEN not set — skipping real diarization test")
 
         let mixPath = try prepare48kHzFixture()
@@ -424,7 +440,7 @@ final class WatchLoopE2ETests: XCTestCase {
         let queue = PipelineQueue(
             logDir: tmpDir,
             whisperKit: engine,
-            diarizationFactory: { DiarizationProcess() },
+            diarizationFactory: { DiarizationProcess(pythonPath: pythonPath, scriptPath: scriptPath) },
             protocolGenerator: mockProtocol,
             outputDir: tmpDir,
             diarizeEnabled: true,
