@@ -52,6 +52,8 @@ class MeetingDetector {
     func checkOnce() -> DetectedMeeting? {
         let windows = windowListProvider()
         var hitsThisRound: Set<String> = []
+        // Track first matching window per pattern for returning DetectedMeeting
+        var firstMatch: [String: (title: String, window: [String: Any])] = [:]
 
         for window in windows {
             for pattern in patterns {
@@ -59,20 +61,29 @@ class MeetingDetector {
                 if let until = cooldownUntil[pattern.appName], Date() < until {
                     continue
                 }
+                // Only count each pattern once per poll (prevents over-counting
+                // when multiple windows match the same app)
+                guard !hitsThisRound.contains(pattern.appName) else { continue }
+
                 if let title = matchWindow(window, pattern: pattern) {
                     hitsThisRound.insert(pattern.appName)
+                    firstMatch[pattern.appName] = (title, window)
                     consecutiveHits[pattern.appName, default: 0] += 1
-
-                    if consecutiveHits[pattern.appName, default: 0] >= confirmationCount {
-                        let pid = window["kCGWindowOwnerPID"] as? Int32 ?? 0
-                        return DetectedMeeting(
-                            pattern: pattern,
-                            windowTitle: title,
-                            ownerName: window["kCGWindowOwnerName"] as? String ?? "",
-                            windowPID: pid
-                        )
-                    }
                 }
+            }
+        }
+
+        // Check if any pattern reached confirmation threshold
+        for (appName, hits) in consecutiveHits {
+            if hits >= confirmationCount, let match = firstMatch[appName],
+               let pattern = patterns.first(where: { $0.appName == appName }) {
+                let pid = match.window["kCGWindowOwnerPID"] as? Int32 ?? 0
+                return DetectedMeeting(
+                    pattern: pattern,
+                    windowTitle: match.title,
+                    ownerName: match.window["kCGWindowOwnerName"] as? String ?? "",
+                    windowPID: pid
+                )
             }
         }
 

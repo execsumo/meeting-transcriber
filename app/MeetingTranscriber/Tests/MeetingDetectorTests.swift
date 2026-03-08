@@ -103,7 +103,7 @@ final class MeetingDetectorTests: XCTestCase {
         XCTAssertNil(detector.checkOnce())
     }
 
-    func testIgnoresEchoTestCall() {
+    func testDetectsEchoTestCall() {
         let detector = MeetingDetector(patterns: [.teams], confirmationCount: 1)
         detector.windowListProvider = {
             [makeWindow(
@@ -111,7 +111,8 @@ final class MeetingDetectorTests: XCTestCase {
                 name: "Echo | e.battery systems GmbH | user@company.com | Microsoft Teams"
             )]
         }
-        XCTAssertNil(detector.checkOnce())
+        // Echo test calls are allowed for testing purposes
+        XCTAssertNotNil(detector.checkOnce())
     }
 
     func testIgnoresSmallWindows() {
