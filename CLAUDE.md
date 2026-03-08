@@ -36,11 +36,25 @@ app/MeetingTranscriber/    # Swift macOS menu bar app (SPM)
     AppSettings.swift      # @Observable settings (UserDefaults + Keychain)
     KeychainHelper.swift   # Keychain CRUD for HF token
     TranscriberStatus.swift # Status + MeetingInfo models
-    SpeakerRequest.swift   # Speaker IPC models
+    SpeakerRequest.swift   # Speaker IPC models (includes expectedNames field)
     WhisperKitEngine.swift # Native WhisperKit transcription (CoreML/ANE)
     NativeTranscriptionManager.swift  # Coordinates WhisperKit → Python protocol handoff
+    WatchLoop.swift        # @MainActor watch loop: detect → record → transcribe → protocol
+    IPCPoller.swift        # @MainActor speaker IPC polling
+    DiarizationProcess.swift  # Async pyannote diarization via Process
+    ProtocolGenerator.swift   # Async Claude CLI protocol generation via Process
+    DualSourceRecorder.swift  # App audio + mic recording (captures startTime in start())
+    MeetingDetector.swift  # Window title matching (counts each pattern once per poll)
+    AudioMixer.swift       # Mixes app + mic audio to 16kHz mono WAV
+    MicRecorder.swift      # Microphone recording via AVAudioEngine
+    MuteDetector.swift     # Mute state detection via accessibility API
+    Permissions.swift      # Permission checks (mic, screen recording)
+    ParticipantReader.swift # Reads meeting participants via accessibility
+    MeetingPatterns.swift  # App-specific window title patterns
     Info.plist             # Bundle metadata
-  Tests/                   # 223 Swift tests (XCTest + ViewInspector)
+  Tests/                   # ~330 Swift tests (XCTest + ViewInspector)
+tools/diarize/             # Standalone diarization script (used by Swift app)
+  diarize.py               # pyannote diarization + speaker DB (atomic writes via os.replace)
 tools/audiotap/            # CATapDescription-based app audio capture (Swift CLI)
   Package.swift            # SPM manifest (macOS 14+)
   Sources/main.swift       # PID → CATapDescription → stdout (interleaved float32)
@@ -119,7 +133,7 @@ transcribe --file recording.wav --diarize --title "Meeting"
 pytest tests/ -v
 pytest tests/ -v -m "not slow"
 
-# Swift tests (218 tests)
+# Swift tests (~330 tests)
 cd app/MeetingTranscriber && swift test
 
 # Run E2E test standalone
@@ -171,6 +185,30 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
 - Protocol output generated in German (via Claude prompt)
 - Python 3.14 via homebrew
 - Lazy imports for optional dependencies (pyannote, pywhispercpp)
+
+## Architecture Notes
+
+**Concurrency:**
+- `WatchLoop` and `IPCPoller` are `@MainActor`. Tests for these classes must also be `@MainActor`.
+- `WhisperKitEngine.loadModel()` deduplicates concurrent calls via `loadingTask` — second caller awaits the first's task. Safe to call from multiple places.
+- `DiarizationProcess` and `ProtocolGenerator` use async process I/O: `terminationHandler` + `withCheckedContinuation` instead of `process.waitUntilExit()`. stdout/stderr are read in detached `Task`s.
+
+**View architecture:**
+- `SettingsView` receives `WhisperKitEngine` as a stored property (not `@State`). Constructor: `SettingsView(settings:whisperKitEngine:)`.
+
+**Recording:**
+- `DualSourceRecorder` captures `recordingStartTime` in `start()`, not in `stop()`.
+- Grace period minimum is 1 second (enforced in `AppSettings.endGrace` setter).
+
+**Detection:**
+- `MeetingDetector` counts each pattern once per poll — prevents over-counting when multiple windows match the same app.
+
+**IPC:**
+- `SpeakerRequest` has `let expectedNames: [String]?` (CodingKey: `expected_names`) for passing known participant names to the diarization script.
+- `save_speaker_db` in `tools/diarize/diarize.py` uses atomic write (write-to-temp + `os.replace`) instead of `flock`.
+
+**Python:**
+- `dotenv` import in `src/meeting_transcriber/diarize.py` is guarded with `try/except ImportError` — the package is optional.
 
 ## Critical Notes
 
