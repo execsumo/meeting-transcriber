@@ -10,6 +10,7 @@ struct MenuBarView: View {
     let onOpenProtocolsFolder: () -> Void
     let onOpenSettings: () -> Void
     let onNameSpeakers: (() -> Void)?
+    let onProcessFiles: () -> Void
     let onDismissJob: (UUID) -> Void
     let onQuit: () -> Void
 
@@ -76,6 +77,13 @@ struct MenuBarView: View {
             }
             .keyboardShortcut("n")
         }
+
+        Button {
+            onProcessFiles()
+        } label: {
+            Label("Process Audio Files...", systemImage: "doc.badge.plus")
+        }
+        .keyboardShortcut("p")
 
         // Processing queue
         if !pipelineQueue.activeJobs.isEmpty || !pipelineQueue.pendingJobs.isEmpty

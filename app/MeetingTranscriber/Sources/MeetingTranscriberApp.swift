@@ -57,6 +57,7 @@ struct MeetingTranscriberApp: App {
                     loadSpeakerRequest()
                     bringWindowToFront(id: "speaker-naming")
                 },
+                onProcessFiles: processAudioFiles,
                 onDismissJob: { id in pipelineQueue.removeJob(id: id) },
                 onQuit: quit
             )
@@ -260,6 +261,41 @@ struct MeetingTranscriberApp: App {
     }
 
     // MARK: - Actions
+
+    private func processAudioFiles() {
+        let panel = NSOpenPanel()
+        panel.title = "Select Audio Files"
+        panel.allowedContentTypes = [.wav]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+
+        // Ensure queue has processing dependencies
+        if pipelineQueue.whisperKit == nil {
+            pipelineQueue = PipelineQueue(
+                whisperKit: whisperKit,
+                diarizationFactory: { DiarizationProcess() },
+                protocolGenerator: DefaultProtocolGenerator(),
+                outputDir: WatchLoop.defaultOutputDir,
+                diarizeEnabled: settings.diarize,
+                micLabel: settings.micName
+            )
+        }
+
+        for url in panel.urls {
+            let title = url.deletingPathExtension().lastPathComponent
+            let job = PipelineJob(
+                meetingTitle: title,
+                appName: "File",
+                mixPath: url,
+                appPath: nil,
+                micPath: nil,
+                micDelay: 0
+            )
+            pipelineQueue.enqueue(job)
+        }
+    }
 
     private func openLastProtocol() {
         if let job = pipelineQueue.completedJobs.last,

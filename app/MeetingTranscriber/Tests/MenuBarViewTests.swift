@@ -43,6 +43,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: onNameSpeakers,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
@@ -170,6 +171,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
@@ -190,6 +192,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: { called = true }
         )
@@ -210,6 +213,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: { called = true },
             onNameSpeakers: nil,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
@@ -230,6 +234,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: { called = true },
             onOpenSettings: {},
             onNameSpeakers: nil,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
@@ -250,6 +255,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
@@ -270,6 +276,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: { called = true },
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
@@ -326,6 +333,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
@@ -358,6 +366,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
@@ -388,6 +397,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
+            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {}
         )
