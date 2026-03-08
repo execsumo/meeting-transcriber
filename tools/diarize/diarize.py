@@ -379,6 +379,7 @@ def diarize(
 
     import torch
     from pyannote.audio import Pipeline
+    from scipy.io import wavfile
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
@@ -392,7 +393,21 @@ def diarize(
     if num_speakers and num_speakers > 0:
         pipeline_params["num_speakers"] = num_speakers
 
-    result = pipeline(str(audio_path), **pipeline_params)
+    # Load audio via scipy to avoid torchcodec/ffmpeg dependency.
+    # pyannote accepts {"waveform": Tensor, "sample_rate": int} dicts.
+    sample_rate, data = wavfile.read(str(audio_path))
+    waveform = torch.from_numpy(data).float()
+    if data.dtype == np.int16:
+        waveform /= 32768.0
+    elif data.dtype == np.int32:
+        waveform /= 2147483648.0
+    if waveform.dim() == 1:
+        waveform = waveform.unsqueeze(0)
+    else:
+        waveform = waveform.T
+    audio_input = {"waveform": waveform, "sample_rate": sample_rate}
+
+    result = pipeline(audio_input, **pipeline_params)
 
     annotation = getattr(result, "speaker_diarization", result)
     raw_embeddings = getattr(result, "speaker_embeddings", None)
