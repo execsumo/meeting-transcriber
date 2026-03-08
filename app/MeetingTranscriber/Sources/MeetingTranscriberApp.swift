@@ -234,28 +234,34 @@ struct MeetingTranscriberApp: App {
                         }
                     }
 
-                    pipelineQueue.onJobStateChange = { [notifications, ipcPoller] job, oldState, newState in
-                        switch newState {
-                        case .diarizing:
-                            ipcPoller.start()
-                        case .done:
-                            ipcPoller.stop()
-                            ipcPoller.reset()
-                            notifications.notify(title: "Protocol Ready", body: job.meetingTitle)
-                        case .error:
-                            ipcPoller.stop()
-                            ipcPoller.reset()
-                            if let err = job.error {
-                                notifications.notify(title: "Error", body: err)
-                            }
-                        default:
-                            break
-                        }
-                    }
+                    configurePipelineCallbacks()
 
                     watchLoop = loop
                     loop.start()
                 }
+            }
+        }
+    }
+
+    // MARK: - Pipeline Callbacks
+
+    private func configurePipelineCallbacks() {
+        pipelineQueue.onJobStateChange = { [notifications, ipcPoller] job, _, newState in
+            switch newState {
+            case .diarizing:
+                ipcPoller.start()
+            case .done:
+                ipcPoller.stop()
+                ipcPoller.reset()
+                notifications.notify(title: "Protocol Ready", body: job.meetingTitle)
+            case .error:
+                ipcPoller.stop()
+                ipcPoller.reset()
+                if let err = job.error {
+                    notifications.notify(title: "Error", body: err)
+                }
+            default:
+                break
             }
         }
     }
@@ -281,6 +287,7 @@ struct MeetingTranscriberApp: App {
                 diarizeEnabled: settings.diarize,
                 micLabel: settings.micName
             )
+            configurePipelineCallbacks()
         }
 
         for url in panel.urls {
