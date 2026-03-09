@@ -354,7 +354,7 @@ class PipelineQueue {
                 claudeBin: claudeBin
             )
 
-            let fullMD = protocolMD + "\n\n---\n\n## Full Transcript\n\n" + transcript
+            let fullMD = protocolMD + "\n\n---\n\n## Full Transcript\n\n" + finalTranscript
             let mdPath = try ProtocolGenerator.saveProtocol(fullMD, title: title, dir: outputDir)
             logger.info("Protocol saved: \(mdPath.lastPathComponent)")
 
