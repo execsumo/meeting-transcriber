@@ -2,19 +2,9 @@ import ApplicationServices
 import AVFoundation
 import SwiftUI
 
-/// Token status icon and color based on whether a HuggingFace token is set.
-func tokenStatusInfo(hasToken: Bool) -> (icon: String, color: String) {
-    hasToken
-        ? ("checkmark.circle.fill", "green")
-        : ("exclamationmark.triangle.fill", "orange")
-}
-
-
 struct SettingsView: View {
     @Bindable var settings: AppSettings
 
-    @State private var tokenInput = ""
-    @State private var hasToken = false
     @State private var audioDevices: [(id: String, name: String)] = []
     @State private var micPermission: AVAuthorizationStatus = .notDetermined
     @State private var screenRecordingOK = false
@@ -134,37 +124,6 @@ struct SettingsView: View {
                         Stepper("", value: $settings.numSpeakers, in: 0...10)
                             .labelsHidden()
                     }
-
-                    // HuggingFace Token
-                    HStack {
-                        Image(systemName: tokenStatusInfo(hasToken: hasToken).icon)
-                            .foregroundStyle(hasToken ? Color.green : Color.orange)
-                        Text(hasToken ? "HuggingFace token set" : "HuggingFace token required")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    SecureField("hf_...", text: $tokenInput)
-
-                    HStack {
-                        Button("Save Token") {
-                            settings.setHFToken(tokenInput)
-                            tokenInput = ""
-                            hasToken = settings.hasHFToken
-                        }
-                        .disabled(tokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                        Button("Clear") {
-                            settings.setHFToken("")
-                            tokenInput = ""
-                            hasToken = false
-                        }
-                        .disabled(!hasToken)
-
-                        Spacer()
-
-                        Link("Get token",
-                             destination: URL(string: "https://huggingface.co/settings/tokens")!)
-                    }
                 }
             }
 
@@ -214,9 +173,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: settings.diarize ? 710 : (settings.noMic ? 490 : 590))
+        .frame(width: 420, height: settings.diarize ? 610 : (settings.noMic ? 490 : 590))
         .onAppear {
-            hasToken = settings.hasHFToken
             refreshPermissions()
         }
     }

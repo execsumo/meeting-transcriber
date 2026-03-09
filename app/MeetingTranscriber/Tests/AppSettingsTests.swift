@@ -124,7 +124,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(UserDefaults.standard.string(forKey: "micName"), "Roman")
     }
 
-    // MARK: - HF Token (Keychain)
+    // MARK: - Keychain
 
     func testKeychainRoundTrip() {
         KeychainHelper.delete(key: "HF_TOKEN_TEST")
@@ -142,22 +142,5 @@ final class AppSettingsTests: XCTestCase {
         KeychainHelper.delete(key: "HF_TOKEN_TEST")
         XCTAssertFalse(KeychainHelper.exists(key: "HF_TOKEN_TEST"))
         XCTAssertNil(KeychainHelper.read(key: "HF_TOKEN_TEST"))
-    }
-
-    func testSetHFTokenStoresInKeychain() {
-        settings.setHFToken("hf_test_token")
-        XCTAssertTrue(settings.hasHFToken)
-        XCTAssertEqual(settings.hfToken, "hf_test_token")
-
-        settings.setHFToken("")
-        XCTAssertFalse(settings.hasHFToken)
-        XCTAssertNil(settings.hfToken)
-    }
-
-    func testSetHFTokenTrimsWhitespace() {
-        settings.setHFToken("  hf_trimmed  \n")
-        XCTAssertEqual(settings.hfToken, "hf_trimmed")
-
-        settings.setHFToken("")
     }
 }
