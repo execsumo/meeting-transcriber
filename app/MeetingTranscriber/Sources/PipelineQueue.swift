@@ -311,16 +311,14 @@ class PipelineQueue {
                             embeddings: diarization.embeddings
                         )
 
-                        // Use cached segments if available, otherwise transcribe
+                        // Use cached segments if available, otherwise transcribe mix
+                        // (mix contains both app + mic audio, matching diarization timeline)
                         let segments: [TimestampedSegment]
                         if let cached = cachedSegments {
                             segments = cached
                         } else {
-                            let segmentAudioPath = appPath != nil
-                                ? workDir.appendingPathComponent("app_16k.wav")
-                                : mix16k
                             segments = try await whisperKit.transcribeSegments(
-                                audioPath: segmentAudioPath
+                                audioPath: mix16k
                             )
                         }
 
