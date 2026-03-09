@@ -28,21 +28,20 @@ app/MeetingTranscriber/    # Swift macOS menu bar app (SPM)
     MenuBarView.swift      # Menu bar dropdown UI
     SettingsView.swift     # Settings window
     SpeakerNamingView.swift # Speaker naming dialog + AccessibleTextField
-    SpeakerCountView.swift # Speaker count dialog
-    PythonProcess.swift    # Launches/manages Python transcribe process (dev + bundle mode)
-    StatusMonitor.swift    # Polls ~/.meeting-transcriber/status.json
-    IPCManager.swift       # Read/write speaker request/response JSON
+    AppPaths.swift         # Centralized paths (ipcDir, dataDir, logSubsystem, speakersDB)
+    AppSettings.swift      # @Observable settings (UserDefaults + file-based secrets)
+    AXHelper.swift         # Shared accessibility API helper
     NotificationManager.swift # macOS notifications
-    AppSettings.swift      # @Observable settings (UserDefaults + Keychain)
-    KeychainHelper.swift   # Keychain CRUD for HF token
+    KeychainHelper.swift   # Keychain CRUD (legacy, token now file-based)
     TranscriberStatus.swift # Status + MeetingInfo models
-    SpeakerRequest.swift   # Speaker IPC models (includes expectedNames field)
     WhisperKitEngine.swift # Native WhisperKit transcription (CoreML/ANE)
-    NativeTranscriptionManager.swift  # Coordinates WhisperKit → Python protocol handoff
-    WatchLoop.swift        # @MainActor watch loop: detect → record → transcribe → protocol
-    IPCPoller.swift        # @MainActor speaker IPC polling
-    DiarizationProcess.swift  # Async pyannote diarization via Process
+    FluidDiarizer.swift    # CoreML-based speaker diarization via FluidAudio (on-device)
+    SpeakerMatcher.swift   # Speaker embedding DB + cosine similarity matching
+    DiarizationProcess.swift  # DiarizationProvider protocol + result types
+    PipelineQueue.swift    # Decouples recording from post-processing (transcription → diarization → protocol)
+    PipelineJob.swift      # Pipeline job model
     ProtocolGenerator.swift   # Async Claude CLI protocol generation via Process
+    WatchLoop.swift        # @MainActor watch loop: detect → record → transcribe → protocol
     DualSourceRecorder.swift  # App audio + mic recording (captures startTime in start())
     MeetingDetector.swift  # Window title matching (counts each pattern once per poll)
     AudioMixer.swift       # Mixes app + mic audio to 16kHz mono WAV
@@ -52,9 +51,7 @@ app/MeetingTranscriber/    # Swift macOS menu bar app (SPM)
     ParticipantReader.swift # Reads meeting participants via accessibility
     MeetingPatterns.swift  # App-specific window title patterns
     Info.plist             # Bundle metadata
-  Tests/                   # ~330 Swift tests (XCTest + ViewInspector)
-tools/diarize/             # Standalone diarization script (used by Swift app)
-  diarize.py               # pyannote diarization + speaker DB (atomic writes via os.replace)
+  Tests/                   # Swift tests (XCTest + ViewInspector)
 tools/audiotap/            # CATapDescription-based app audio capture (Swift CLI)
   Package.swift            # SPM manifest (macOS 14+)
   Sources/main.swift       # PID → CATapDescription → stdout (interleaved float32)
@@ -88,17 +85,17 @@ docs/
   dmg_distribution_plan.md     # DMG distribution planning
 protocols/                 # Output directory (gitignored)
 speakers.json              # Saved voice profiles (gitignored, created at runtime)
-.env                       # HF_TOKEN for diarization (gitignored)
+.env                       # Environment variables (gitignored)
 ```
 
 ## Pipeline
 
 ```
-Python engine (default):
-  App audio (audiotap/CATapDescription) + Microphone → mix → 16kHz mono WAV → Whisper (pywhispercpp) → [pyannote diarization] → Claude CLI → Markdown protocol
+Native Swift pipeline (menu bar app):
+  App audio (audiotap/CATapDescription) + Microphone → mix → 16kHz mono WAV → WhisperKit (CoreML/ANE) → FluidAudio diarization (CoreML/ANE) → Claude CLI → Markdown protocol
 
-WhisperKit engine (native Swift, no diarization):
-  App audio → mix → 16kHz mono WAV → WhisperKit (CoreML/ANE) → transcript.txt → Claude CLI → Markdown protocol
+Python CLI pipeline:
+  App audio (audiotap/CATapDescription) + Microphone → mix → 16kHz mono WAV → Whisper (pywhispercpp) → Claude CLI → Markdown protocol
 ```
 
 ## Setup
@@ -107,7 +104,7 @@ WhisperKit engine (native Swift, no diarization):
 # Python
 /opt/homebrew/bin/python3.14 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[mac,diarize,dev]"
+pip install -e ".[mac,dev]"
 
 # Build audiotap Swift binary (app audio capture):
 ./scripts/build_audiotap.sh
@@ -124,7 +121,7 @@ ruff check src/ tests/ && ruff format src/ tests/
 
 # Run macOS transcriber (CLI)
 transcribe --app "Microsoft Teams" --title "Meeting"
-transcribe --file recording.wav --diarize --title "Meeting"
+transcribe --file recording.wav --title "Meeting"
 
 # Run menu bar app
 ./scripts/run_app.sh
@@ -133,7 +130,7 @@ transcribe --file recording.wav --diarize --title "Meeting"
 pytest tests/ -v
 pytest tests/ -v -m "not slow"
 
-# Swift tests (~330 tests)
+# Swift tests (~240 tests)
 cd app/MeetingTranscriber && swift test
 
 # Run E2E test standalone
@@ -161,7 +158,7 @@ brew install --cask meeting-transcriber
 
 **Bundle mode:** When `MEETING_TRANSCRIBER_BUNDLED=1` is set, all output files go to
 `~/Library/Application Support/MeetingTranscriber/` instead of CWD. The Swift app sets
-this automatically when running from a bundle with embedded `Resources/python-env/`.
+this automatically when running from a bundle.
 
 **Release workflow:** Push a `v*` tag to trigger `.github/workflows/release.yml` which
 builds the DMG on a macOS-14 runner and creates a GitHub Release.
@@ -189,9 +186,9 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
 ## Architecture Notes
 
 **Concurrency:**
-- `WatchLoop` and `IPCPoller` are `@MainActor`. Tests for these classes must also be `@MainActor`.
+- `WatchLoop` is `@MainActor`. Tests for this class must also be `@MainActor`.
 - `WhisperKitEngine.loadModel()` deduplicates concurrent calls via `loadingTask` — second caller awaits the first's task. Safe to call from multiple places.
-- `DiarizationProcess` and `ProtocolGenerator` use async process I/O: `terminationHandler` + `withCheckedContinuation` instead of `process.waitUntilExit()`. stdout/stderr are read in detached `Task`s.
+- `ProtocolGenerator` uses async process I/O: `terminationHandler` + `withCheckedContinuation` instead of `process.waitUntilExit()`. stdout/stderr are read in detached `Task`s.
 
 **View architecture:**
 - `SettingsView` receives `WhisperKitEngine` as a stored property (not `@State`). Constructor: `SettingsView(settings:whisperKitEngine:)`.
@@ -203,20 +200,14 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
 **Detection:**
 - `MeetingDetector` counts each pattern once per poll — prevents over-counting when multiple windows match the same app.
 
-**IPC:**
-- `SpeakerRequest` has `let expectedNames: [String]?` (CodingKey: `expected_names`) for passing known participant names to the diarization script.
-- `save_speaker_db` in `tools/diarize/diarize.py` uses atomic write (write-to-temp + `os.replace`) instead of `flock`.
-
-**Python:**
-- `dotenv` import in `src/meeting_transcriber/diarize.py` is guarded with `try/except ImportError` — the package is optional.
+**Diarization:**
+- `FluidDiarizer` uses FluidAudio (CoreML/ANE) for on-device speaker diarization — no HuggingFace token or Python subprocess needed.
+- `SpeakerMatcher` stores speaker embeddings in `speakers.json` and matches via cosine similarity. Migrates old pyannote-format DB automatically.
+- `DiarizationProvider` protocol enables mock injection in tests.
 
 ## Critical Notes
 
 - audiotap Swift binary must be built: `./scripts/build_audiotap.sh` (uses CATapDescription, macOS 14.2+)
 - Screen Recording permission required for **meeting detection** (window titles via `CGWindowListCopyWindowInfo`) — for Terminal (CLI) AND MeetingTranscriber.app
 - Audio capture (audiotap) does NOT require Screen Recording — uses CATapDescription (purple dot indicator)
-- pyannote diarization requires HuggingFace token + license acceptance for 3 models:
-  - pyannote/speaker-diarization-3.1
-  - pyannote/segmentation-3.0
-  - pyannote/speaker-diarization-community-1
-- Swift ↔ Python IPC via JSON files in `~/.meeting-transcriber/` (status, speaker requests/responses)
+- FluidAudio models are downloaded automatically on first run (~50 MB)
