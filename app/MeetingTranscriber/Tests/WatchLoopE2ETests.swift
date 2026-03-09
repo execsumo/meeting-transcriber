@@ -416,6 +416,9 @@ final class WatchLoopE2ETests: XCTestCase {
         engine.modelVariant = "openai_whisper-small"
         engine.language = "de"
 
+        // Use isolated speaker DB so test doesn't affect real data
+        let testDB = tmpDir.appendingPathComponent("speakers_test.json")
+
         let queue = PipelineQueue(
             logDir: tmpDir,
             whisperKit: engine,
@@ -423,20 +426,20 @@ final class WatchLoopE2ETests: XCTestCase {
             protocolGenerator: mockProtocol,
             outputDir: tmpDir,
             diarizeEnabled: true,
-            micLabel: "Roman"
+            micLabel: "Roman",
+            speakerMatcherFactory: { SpeakerMatcher(dbPath: testDB) }
         )
 
-        // Auto-complete speaker naming when the popup would appear
-        let observer = NotificationCenter.default.addObserver(
-            forName: .showSpeakerNaming, object: nil, queue: .main
-        ) { _ in
-            Task { @MainActor in
-                if let data = queue.pendingSpeakerNaming {
-                    queue.completeSpeakerNaming(mapping: data.mapping)
+        // Auto-complete speaker naming with known names
+        queue.speakerNamingHandler = { data in
+            var mapping = data.mapping
+            for label in mapping.keys {
+                if mapping[label] == label {
+                    mapping[label] = "TestSpeaker"
                 }
             }
+            return mapping
         }
-        defer { NotificationCenter.default.removeObserver(observer) }
 
         let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
 
@@ -452,10 +455,23 @@ final class WatchLoopE2ETests: XCTestCase {
         XCTAssertTrue(mockProtocol.generateCalled, "Protocol generator should have been called")
         XCTAssertEqual(queue.jobs[0].state, .done, "Job should complete with real diarization")
 
-        // Verify transcript contains speaker segments
+        // Verify transcript contains speaker names (not raw SPEAKER_0 labels)
         if let transcript = mockProtocol.capturedTranscript {
             XCTAssertFalse(transcript.isEmpty, "Transcript should not be empty")
+            XCTAssertTrue(
+                transcript.contains("TestSpeaker"),
+                "Transcript should contain named speaker, got: \(transcript.prefix(300))"
+            )
+            XCTAssertFalse(
+                transcript.contains("SPEAKER_"),
+                "Transcript should not contain raw SPEAKER_ labels, got: \(transcript.prefix(300))"
+            )
         }
+
+        // Verify speaker DB was updated
+        let matcher = SpeakerMatcher(dbPath: testDB)
+        let stored = matcher.loadDB()
+        XCTAssertFalse(stored.isEmpty, "Speaker DB should have been populated")
     }
 
     // MARK: - 8. WatchLoop Enqueues Job After Recording

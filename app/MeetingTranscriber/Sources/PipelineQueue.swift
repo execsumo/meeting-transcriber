@@ -17,6 +17,7 @@ class PipelineQueue {
     let diarizeEnabled: Bool
     let micLabel: String
     let claudeBin: String
+    let speakerMatcherFactory: () -> SpeakerMatcher
 
     let completedJobLifetime: TimeInterval
 
@@ -48,6 +49,11 @@ class PipelineQueue {
         speakerNamingContinuation = nil
     }
 
+    /// Handler for speaker naming. When set, called instead of the default
+    /// continuation-based popup. Receives naming data, returns final mapping.
+    /// Used by tests to auto-complete without UI interaction.
+    var speakerNamingHandler: ((SpeakerNamingData) async -> [String: String])?
+
     /// Simple init for skeleton tests and basic queue usage.
     init(logDir: URL? = nil, completedJobLifetime: TimeInterval = 60) {
         self.logDir = logDir ?? AppPaths.ipcDir
@@ -58,6 +64,7 @@ class PipelineQueue {
         self.diarizeEnabled = false
         self.micLabel = "Me"
         self.claudeBin = "claude"
+        self.speakerMatcherFactory = { SpeakerMatcher() }
         self.completedJobLifetime = completedJobLifetime
     }
 
@@ -71,6 +78,7 @@ class PipelineQueue {
         diarizeEnabled: Bool = false,
         micLabel: String = "Me",
         claudeBin: String = "claude",
+        speakerMatcherFactory: @escaping () -> SpeakerMatcher = { SpeakerMatcher() },
         completedJobLifetime: TimeInterval = 60
     ) {
         self.logDir = logDir ?? AppPaths.ipcDir
@@ -81,6 +89,7 @@ class PipelineQueue {
         self.diarizeEnabled = diarizeEnabled
         self.micLabel = micLabel
         self.claudeBin = claudeBin
+        self.speakerMatcherFactory = speakerMatcherFactory
         self.completedJobLifetime = completedJobLifetime
     }
 
@@ -228,27 +237,34 @@ class PipelineQueue {
                         // Speaker matching via embeddings
                         var autoNames = diarization.autoNames
                         if let embeddings = diarization.embeddings {
-                            let matcher = SpeakerMatcher()
+                            let matcher = speakerMatcherFactory()
                             let matched = matcher.match(embeddings: embeddings)
                             autoNames = matched
+
+                            let namingData = SpeakerNamingData(
+                                jobID: jobID,
+                                meetingTitle: title,
+                                mapping: matched,
+                                speakingTimes: diarization.speakingTimes,
+                                embeddings: embeddings
+                            )
 
                             // Check if any speakers are unmatched (name == label)
                             let unmatched = matched.filter { $0.value == $0.key }
                             if !unmatched.isEmpty {
-                                // Show naming popup and suspend until user responds
-                                let userMapping = await withCheckedContinuation { continuation in
-                                    self.speakerNamingContinuation = continuation
-                                    self.pendingSpeakerNaming = SpeakerNamingData(
-                                        jobID: jobID,
-                                        meetingTitle: title,
-                                        mapping: matched,
-                                        speakingTimes: diarization.speakingTimes,
-                                        embeddings: embeddings
-                                    )
-                                    NotificationCenter.default.post(
-                                        name: .showSpeakerNaming,
-                                        object: nil
-                                    )
+                                let userMapping: [String: String]
+                                if let handler = speakerNamingHandler {
+                                    userMapping = await handler(namingData)
+                                } else {
+                                    // Default: show naming popup via continuation
+                                    userMapping = await withCheckedContinuation { continuation in
+                                        self.speakerNamingContinuation = continuation
+                                        self.pendingSpeakerNaming = namingData
+                                        NotificationCenter.default.post(
+                                            name: .showSpeakerNaming,
+                                            object: nil
+                                        )
+                                    }
                                 }
 
                                 // Merge user names into autoNames
