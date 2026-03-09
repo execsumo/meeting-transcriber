@@ -55,7 +55,7 @@ jobs:
           if [ -n "$DEVELOPER_ID" ]; then
             ./scripts/build_release.sh
           else
-            ./scripts/build_release.sh --no-notarize --no-diarize
+            ./scripts/build_release.sh --no-notarize
           fi
 
       - name: Get version

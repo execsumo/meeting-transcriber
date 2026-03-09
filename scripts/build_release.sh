@@ -2,15 +2,7 @@
 # Build a self-contained MeetingTranscriber.app bundle.
 #
 # Usage:
-#   ./scripts/build_release.sh [--notarize] [--with-diarize]
-#
-# Without --with-diarize: Swift-only bundle (~100 MB)
-#   - audiotap (app audio capture)
-#   - MeetingTranscriber (Swift menu bar app with WhisperKit)
-#
-# With --with-diarize: adds Python diarization venv (~200 MB)
-#   - python-diarize/ (pyannote-audio + torch)
-#   - diarize.py (standalone script)
+#   ./scripts/build_release.sh [--no-notarize]
 #
 # Output:
 #   .build/release/MeetingTranscriber.dmg
@@ -18,7 +10,6 @@
 # Requirements:
 #   - macOS 14+ (Sonoma) on Apple Silicon
 #   - Xcode Command Line Tools (swift, codesign, hdiutil)
-#   - Internet access (downloads python-build-standalone if --with-diarize)
 
 set -euo pipefail
 
@@ -33,25 +24,21 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
 fi
 
 BUILD_DIR="$PROJECT_ROOT/.build/release"
-CACHE_DIR="$PROJECT_ROOT/.build/python-standalone-cache"
 APP_BUNDLE="$BUILD_DIR/MeetingTranscriber.app"
 CONTENTS="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 
 NOTARIZE=true
-WITH_DIARIZE=true
 for arg in "$@"; do
     case "$arg" in
         --no-notarize) NOTARIZE=false ;;
-        --no-diarize) WITH_DIARIZE=false ;;
     esac
 done
 
 # Read version from pyproject.toml
 VERSION=$(grep '^version = ' "$PROJECT_ROOT/pyproject.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
 echo "Building MeetingTranscriber v${VERSION}"
-echo "  Diarization: $WITH_DIARIZE"
 echo "  Notarize:    $NOTARIZE"
 echo "======================================="
 
@@ -101,71 +88,10 @@ GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 /usr/libexec/PlistBuddy -c "Add :GitCommitHash string $GIT_HASH" "$CONTENTS/Info.plist" 2>/dev/null || \
 /usr/libexec/PlistBuddy -c "Set :GitCommitHash $GIT_HASH" "$CONTENTS/Info.plist"
 
-# ── Step 4 (optional): Build diarization Python venv ─────────────────────────
-
-if [ "$WITH_DIARIZE" = true ]; then
-    echo ""
-    echo "Step 4: Building diarization Python venv..."
-
-    PYTHON_VERSION="3.14.3"
-    PBS_RELEASE="20260303"
-    PYTHON_ARCHIVE="cpython-${PYTHON_VERSION}+${PBS_RELEASE}-aarch64-apple-darwin-install_only_stripped.tar.gz"
-    PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${PYTHON_ARCHIVE}"
-
-    mkdir -p "$CACHE_DIR"
-    CACHED_ARCHIVE="$CACHE_DIR/$PYTHON_ARCHIVE"
-
-    if [ ! -f "$CACHED_ARCHIVE" ]; then
-        echo "  Downloading python-build-standalone..."
-        curl -L --progress-bar -o "$CACHED_ARCHIVE" "$PYTHON_URL"
-    else
-        echo "  Using cached Python archive"
-    fi
-
-    # Extract standalone Python directly as the diarize environment
-    # (no venv — avoids broken symlinks and missing stdlib)
-    DIARIZE_ENV="$RESOURCES/python-diarize"
-    rm -rf "$DIARIZE_ENV"
-    mkdir -p "$DIARIZE_ENV"
-    tar xzf "$CACHED_ARCHIVE" -C "$DIARIZE_ENV" --strip-components=1
-
-    echo "  Installing diarization dependencies..."
-    "$DIARIZE_ENV/bin/pip3" install --upgrade pip --quiet
-    "$DIARIZE_ENV/bin/pip3" install -r "$PROJECT_ROOT/tools/diarize/requirements.txt" --quiet
-
-    # Copy standalone diarize script
-    cp "$PROJECT_ROOT/tools/diarize/diarize.py" "$DIARIZE_ENV/diarize.py"
-
-    # Clean up cruft to reduce bundle size
-    rm -rf "$DIARIZE_ENV"/lib/python*/site-packages/pip
-    rm -rf "$DIARIZE_ENV"/lib/python*/site-packages/setuptools
-    rm -rf "$DIARIZE_ENV"/lib/python*/site-packages/pkg_resources
-    rm -rf "$DIARIZE_ENV"/lib/python*/site-packages/pip-*.dist-info
-    rm -rf "$DIARIZE_ENV"/lib/python*/site-packages/setuptools-*.dist-info
-    find "$DIARIZE_ENV" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-    find "$DIARIZE_ENV" -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
-    find "$DIARIZE_ENV" -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
-    # Remove large CUDA/ROCm binary libraries (not Python source referencing CUDA)
-    find "$DIARIZE_ENV" -name "*.so" -path "*cuda*" -delete 2>/dev/null || true
-    find "$DIARIZE_ENV" -name "*.dylib" -path "*cuda*" -delete 2>/dev/null || true
-    find "$DIARIZE_ENV" -name "*.so" -path "*cudnn*" -delete 2>/dev/null || true
-    find "$DIARIZE_ENV" -name "*.so" -path "*rocm*" -delete 2>/dev/null || true
-    find "$DIARIZE_ENV" -name "*.pyc" -delete 2>/dev/null || true
-    rm -f "$DIARIZE_ENV"/lib/libpython*.a
-    rm -rf "$DIARIZE_ENV/share"
-    rm -rf "$DIARIZE_ENV/include"
-
-    DIARIZE_SIZE=$(du -sh "$DIARIZE_ENV" | cut -f1)
-    echo "  Diarization env: $DIARIZE_SIZE"
-else
-    echo ""
-    echo "Step 4: Skipping diarization (use --with-diarize to include)"
-fi
-
-# ── Step 5: Code signing ─────────────────────────────────────────────────────
+# ── Step 4: Code signing ─────────────────────────────────────────────────────
 
 echo ""
-echo "Step 5: Code signing..."
+echo "Step 4: Code signing..."
 
 if [ "$NOTARIZE" = true ]; then
     if [ -z "${DEVELOPER_ID:-}" ]; then
@@ -197,15 +123,6 @@ ENTITLEMENTS_EOF
             codesign --force --sign "$DEVELOPER_ID" --options runtime --timestamp "$lib"
         done
 
-    # Sign executables in diarization venv (if present)
-    if [ -d "$RESOURCES/python-diarize" ]; then
-        echo "  Signing diarization executables..."
-        find "$RESOURCES/python-diarize" -type f -perm +111 -not -name "*.py" -not -name "*.sh" -print0 2>/dev/null | \
-            while IFS= read -r -d '' exe; do
-                codesign --force --sign "$DEVELOPER_ID" --options runtime --timestamp "$exe"
-            done
-    fi
-
     # Sign audiotap binary
     if [ -f "$RESOURCES/audiotap" ]; then
         codesign --force --sign "$DEVELOPER_ID" \
@@ -229,14 +146,14 @@ else
     fi
 fi
 
-# ── Step 6: Create DMG ───────────────────────────────────────────────────────
+# ── Step 5: Create DMG ───────────────────────────────────────────────────────
 
 DMG_NAME="MeetingTranscriber-${VERSION}.dmg"
 DMG_PATH="$BUILD_DIR/$DMG_NAME"
 
 if [ -z "${HOMEBREW_TEMP:-}" ]; then
     echo ""
-    echo "Step 6: Creating DMG..."
+    echo "Step 5: Creating DMG..."
 
     rm -f "$DMG_PATH"
 
@@ -254,11 +171,11 @@ if [ -z "${HOMEBREW_TEMP:-}" ]; then
     mv "$DMG_STAGING/MeetingTranscriber.app" "$APP_BUNDLE"
     rm -rf "$DMG_STAGING"
 
-    # ── Step 7: Notarize (optional) ──────────────────────────────────────────
+    # ── Step 6: Notarize (optional) ──────────────────────────────────────────
 
     if [ "$NOTARIZE" = true ]; then
         echo ""
-        echo "Step 7: Notarizing DMG..."
+        echo "Step 6: Notarizing DMG..."
 
         if [ -z "${APPLE_ID:-}" ] || [ -z "${TEAM_ID:-}" ] || [ -z "${APP_PASSWORD:-}" ]; then
             echo "  ERROR: APPLE_ID, TEAM_ID, and APP_PASSWORD must be set for notarization."
@@ -275,7 +192,7 @@ if [ -z "${HOMEBREW_TEMP:-}" ]; then
     fi
 else
     echo ""
-    echo "Step 6: Skipping DMG (Homebrew mode)"
+    echo "Step 5: Skipping DMG (Homebrew mode)"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
