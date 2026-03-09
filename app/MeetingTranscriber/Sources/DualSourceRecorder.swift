@@ -24,7 +24,6 @@ protocol RecordingProvider {
 @Observable
 class DualSourceRecorder: RecordingProvider {
     private var audiotapProcess: Process?
-    private var micRecorder: MicRecorder?
     private var muteDetector: MuteDetector?
     private var appAudioFrames: [Data] = []
     private var readerTask: Task<Void, Never>?
@@ -251,10 +250,16 @@ class DualSourceRecorder: RecordingProvider {
 
         if FileManager.default.fileExists(atPath: expectedMicPath.path),
            (try? FileManager.default.attributesOfItem(atPath: expectedMicPath.path)[.size] as? Int) ?? 0 > 44 {
-            let micFile = expectedMicPath
-            micSamples = try AudioMixer.loadWAVAsFloat32(url: micFile)
-            micPath = micFile
-            logger.info("Mic audio loaded: \(micFile.lastPathComponent)")
+            let micAudioFile = try AVAudioFile(forReading: expectedMicPath)
+            let micFileRate = Int(micAudioFile.processingFormat.sampleRate)
+            micSamples = try AudioMixer.loadWAVAsFloat32(url: expectedMicPath)
+            micPath = expectedMicPath
+            logger.info("Mic audio loaded: \(expectedMicPath.lastPathComponent) (\(micFileRate) Hz)")
+
+            if micFileRate != recordRate {
+                micSamples = AudioMixer.resample(micSamples, from: micFileRate, to: recordRate)
+                logger.info("Mic resampled: \(micFileRate) → \(self.recordRate) Hz")
+            }
         }
 
         // ── Apply mute mask ──
