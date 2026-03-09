@@ -226,7 +226,8 @@ struct SpeakerNamingView: View {
 
         do {
             let samples = try AudioMixer.loadWAVAsFloat32(url: audioPath)
-            let sampleRate = 16000
+            let audioFile = try AVAudioFile(forReading: audioPath)
+            let sampleRate = Int(audioFile.processingFormat.sampleRate)
             let startSample = max(0, Int(longest.start) * sampleRate)
             let endSample = min(samples.count, Int(longest.end) * sampleRate)
             guard startSample < endSample else { return }
