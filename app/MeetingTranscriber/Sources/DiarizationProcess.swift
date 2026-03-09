@@ -14,6 +14,7 @@ struct DiarizationResult {
     let segments: [Segment]
     let speakingTimes: [String: TimeInterval]
     let autoNames: [String: String]
+    var embeddings: [String: [Float]]?
 }
 
 /// Abstraction for diarization, enabling mock injection in tests.
@@ -178,7 +179,8 @@ class DiarizationProcess: DiarizationProvider {
         return DiarizationResult(
             segments: segments,
             speakingTimes: speakingTimes,
-            autoNames: autoNames
+            autoNames: autoNames,
+            embeddings: nil
         )
     }
 

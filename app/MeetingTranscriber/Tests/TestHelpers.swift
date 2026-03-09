@@ -48,7 +48,8 @@ class MockDiarization: DiarizationProvider {
                 .init(start: 5, end: 10, speaker: "SPEAKER_01"),
             ],
             speakingTimes: ["SPEAKER_00": 5.0, "SPEAKER_01": 5.0],
-            autoNames: [:]
+            autoNames: [:],
+            embeddings: nil
         )
     }
 }

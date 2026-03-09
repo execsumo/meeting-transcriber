@@ -126,7 +126,8 @@ final class DiarizationProcessTests: XCTestCase {
                 .init(start: 6, end: 15, speaker: "Bob"),
             ],
             speakingTimes: ["Alice": 6, "Bob": 9],
-            autoNames: [:]
+            autoNames: [:],
+            embeddings: nil
         )
 
         let result = DiarizationProcess.assignSpeakers(
@@ -148,7 +149,8 @@ final class DiarizationProcessTests: XCTestCase {
                 .init(start: 0, end: 5, speaker: "Alice"),
             ],
             speakingTimes: ["Alice": 5],
-            autoNames: [:]
+            autoNames: [:],
+            embeddings: nil
         )
 
         let result = DiarizationProcess.assignSpeakers(
@@ -161,7 +163,7 @@ final class DiarizationProcessTests: XCTestCase {
     func testAssignSpeakersEmpty() {
         let result = DiarizationProcess.assignSpeakers(
             transcript: [],
-            diarization: DiarizationResult(segments: [], speakingTimes: [:], autoNames: [:])
+            diarization: DiarizationResult(segments: [], speakingTimes: [:], autoNames: [:], embeddings: nil)
         )
         XCTAssertTrue(result.isEmpty)
     }
