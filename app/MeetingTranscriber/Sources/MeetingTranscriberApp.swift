@@ -10,7 +10,6 @@ extension Notification.Name {
 @main
 struct MeetingTranscriberApp: App {
     @State private var settings = AppSettings()
-    @State private var speakerRequest: SpeakerRequest?
     @State private var speakerCountRequest: SpeakerCountRequest?
     @State private var watchLoop: WatchLoop?
     @State private var pipelineQueue = PipelineQueue()
@@ -54,7 +53,6 @@ struct MeetingTranscriberApp: App {
                     bringWindowToFront(id: "settings")
                 },
                 onNameSpeakers: {
-                    loadSpeakerRequest()
                     bringWindowToFront(id: "speaker-naming")
                 },
                 onProcessFiles: processAudioFiles,
@@ -84,10 +82,9 @@ struct MeetingTranscriberApp: App {
         }
 
         Window("Name Speakers", id: "speaker-naming") {
-            if let request = speakerRequest {
-                SpeakerNamingView(request: request) { mapping in
-                    writeSpeakerResponse(mapping)
-                    speakerRequest = nil
+            if let data = pipelineQueue.pendingSpeakerNaming {
+                SpeakerNamingView(data: data) { mapping in
+                    pipelineQueue.completeSpeakerNaming(mapping: mapping)
                     closeWindow(id: "speaker-naming")
                 }
             } else {
@@ -229,7 +226,7 @@ struct MeetingTranscriberApp: App {
     private func makePipelineQueue() -> PipelineQueue {
         PipelineQueue(
             whisperKit: whisperKit,
-            diarizationFactory: { DiarizationProcess() },
+            diarizationFactory: { FluidDiarizer() },
             protocolGenerator: DefaultProtocolGenerator(),
             outputDir: WatchLoop.defaultOutputDir,
             diarizeEnabled: settings.diarize,
@@ -244,24 +241,12 @@ struct MeetingTranscriberApp: App {
                 NotificationCenter.default.post(name: .showSpeakerCount, object: nil)
             }
         }
-        ipcPoller.onSpeakerRequest = { request in
-            DispatchQueue.main.async {
-                self.speakerRequest = request
-                NotificationCenter.default.post(name: .showSpeakerNaming, object: nil)
-            }
-        }
 
-        pipelineQueue.onJobStateChange = { [notifications, ipcPoller] job, _, newState in
+        pipelineQueue.onJobStateChange = { [notifications] job, _, newState in
             switch newState {
-            case .diarizing:
-                ipcPoller.start()
             case .done:
-                ipcPoller.stop()
-                ipcPoller.reset()
                 notifications.notify(title: "Protocol Ready", body: job.meetingTitle)
             case .error:
-                ipcPoller.stop()
-                ipcPoller.reset()
                 if let err = job.error {
                     notifications.notify(title: "Error", body: err)
                 }
@@ -332,10 +317,6 @@ struct MeetingTranscriberApp: App {
         NSWorkspace.shared.open(protocols)
     }
 
-    private func loadSpeakerRequest() {
-        speakerRequest = ipc.loadSpeakerRequest()
-    }
-
     private func loadSpeakerCountRequest() {
         speakerCountRequest = ipc.loadSpeakerCountRequest()
     }
@@ -345,14 +326,6 @@ struct MeetingTranscriberApp: App {
             try ipc.writeSpeakerCountResponse(count)
         } catch {
             NSLog("SpeakerCount: failed to write response: \(error)")
-        }
-    }
-
-    private func writeSpeakerResponse(_ mapping: [String: String]) {
-        do {
-            try ipc.writeSpeakerResponse(mapping)
-        } catch {
-            NSLog("Speaker naming: failed to write response: \(error)")
         }
     }
 

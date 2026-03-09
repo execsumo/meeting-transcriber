@@ -26,6 +26,28 @@ class PipelineQueue {
     /// Called when a job completes (success or error) — for notifications
     var onJobStateChange: ((PipelineJob, JobState, JobState) -> Void)?
 
+    // MARK: - Speaker Naming
+
+    /// Data for the speaker naming popup.
+    struct SpeakerNamingData {
+        let jobID: UUID
+        let meetingTitle: String
+        let mapping: [String: String]       // label → auto-matched name or label
+        let speakingTimes: [String: TimeInterval]
+        let embeddings: [String: [Float]]
+    }
+
+    /// Set when the pipeline is waiting for the user to name speakers.
+    var pendingSpeakerNaming: SpeakerNamingData?
+    private var speakerNamingContinuation: CheckedContinuation<[String: String], Never>?
+
+    /// Called by the UI when the user confirms or skips speaker naming.
+    func completeSpeakerNaming(mapping: [String: String]) {
+        pendingSpeakerNaming = nil
+        speakerNamingContinuation?.resume(returning: mapping)
+        speakerNamingContinuation = nil
+    }
+
     /// Simple init for skeleton tests and basic queue usage.
     init(logDir: URL? = nil, completedJobLifetime: TimeInterval = 60) {
         self.logDir = logDir ?? AppPaths.ipcDir
@@ -203,6 +225,53 @@ class PipelineQueue {
                             meetingTitle: title
                         )
 
+                        // Speaker matching via embeddings
+                        var autoNames = diarization.autoNames
+                        if let embeddings = diarization.embeddings {
+                            let matcher = SpeakerMatcher()
+                            let matched = matcher.match(embeddings: embeddings)
+                            autoNames = matched
+
+                            // Check if any speakers are unmatched (name == label)
+                            let unmatched = matched.filter { $0.value == $0.key }
+                            if !unmatched.isEmpty {
+                                // Show naming popup and suspend until user responds
+                                let userMapping = await withCheckedContinuation { continuation in
+                                    self.speakerNamingContinuation = continuation
+                                    self.pendingSpeakerNaming = SpeakerNamingData(
+                                        jobID: jobID,
+                                        meetingTitle: title,
+                                        mapping: matched,
+                                        speakingTimes: diarization.speakingTimes,
+                                        embeddings: embeddings
+                                    )
+                                    NotificationCenter.default.post(
+                                        name: .showSpeakerNaming,
+                                        object: nil
+                                    )
+                                }
+
+                                // Merge user names into autoNames
+                                for (label, name) in userMapping where !name.isEmpty {
+                                    autoNames[label] = name
+                                }
+
+                                // Save to DB
+                                matcher.updateDB(mapping: autoNames, embeddings: embeddings)
+                            } else {
+                                // All matched — update DB with fresh embeddings
+                                matcher.updateDB(mapping: matched, embeddings: embeddings)
+                            }
+                        }
+
+                        // Apply speaker names to segments
+                        let namedDiarization = DiarizationResult(
+                            segments: diarization.segments,
+                            speakingTimes: diarization.speakingTimes,
+                            autoNames: autoNames,
+                            embeddings: diarization.embeddings
+                        )
+
                         // Use cached segments if available, otherwise transcribe
                         let segments: [TimestampedSegment]
                         if let cached = cachedSegments {
@@ -218,16 +287,16 @@ class PipelineQueue {
 
                         let labeled = DiarizationProcess.assignSpeakers(
                             transcript: segments,
-                            diarization: diarization
+                            diarization: namedDiarization
                         )
                         finalTranscript = labeled.map(\.formattedLine).joined(separator: "\n")
-                        logger.info("Diarization complete: \(diarization.segments.count) segments")
+                        logger.info("Diarization complete: \(namedDiarization.segments.count) segments")
                     } catch {
                         logger.warning("Diarization failed, using undiarized transcript: \(error.localizedDescription)")
                         // Continue with original transcript
                     }
                 } else {
-                    logger.info("Diarization not available (python-diarize not in bundle)")
+                    logger.info("Diarization not available")
                 }
             }
 

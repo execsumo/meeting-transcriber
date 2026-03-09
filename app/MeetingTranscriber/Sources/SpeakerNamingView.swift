@@ -1,4 +1,3 @@
-import AVFoundation
 import SwiftUI
 
 /// NSTextField subclass that forwards accessibility `set value` (AppleScript)
@@ -87,25 +86,36 @@ func sampleURL(baseDir: String, sampleFile: String) -> URL {
 
 /// Window that lets the user name speakers after diarization.
 struct SpeakerNamingView: View {
-    let request: SpeakerRequest
+    let data: PipelineQueue.SpeakerNamingData
     let onComplete: ([String: String]) -> Void
 
     @State private var names: [String] = []
-    @State private var audioPlayer: AVAudioPlayer?
     @State private var completed = false
 
-    init(request: SpeakerRequest, onComplete: @escaping ([String: String]) -> Void) {
-        self.request = request
+    private var speakers: [(label: String, autoName: String?, speakingTime: Double)] {
+        data.mapping.keys.sorted().map { label in
+            let autoName = data.mapping[label]
+            let isAutoNamed = autoName != nil && autoName != label
+            return (
+                label: label,
+                autoName: isAutoNamed ? autoName : nil,
+                speakingTime: data.speakingTimes[label] ?? 0
+            )
+        }
+    }
+
+    init(data: PipelineQueue.SpeakerNamingData, onComplete: @escaping ([String: String]) -> Void) {
+        self.data = data
         self.onComplete = onComplete
     }
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Name Speakers — \"\(request.meetingTitle)\"")
+            Text("Name Speakers — \"\(data.meetingTitle)\"")
                 .font(.headline)
                 .padding(.top, 8)
 
-            ForEach(Array(request.speakers.enumerated()), id: \.element.id) { index, speaker in
+            ForEach(Array(speakers.enumerated()), id: \.element.label) { index, speaker in
                 speakerRow(index: index, speaker: speaker)
             }
 
@@ -131,15 +141,11 @@ struct SpeakerNamingView: View {
         }
         .padding()
         .frame(minWidth: 400)
-        .id(request.meetingTitle)
+        .id(data.meetingTitle)
         .onAppear {
-            names = request.speakers.map { $0.autoName ?? "" }
+            names = speakers.map { $0.autoName ?? "" }
         }
         .onDisappear {
-            audioPlayer?.stop()
-            audioPlayer = nil
-            // If window is closed without Confirm/Skip, emit empty response
-            // so Python doesn't block waiting for speaker_response.json
             if !completed {
                 completed = true
                 onComplete([:])
@@ -148,7 +154,10 @@ struct SpeakerNamingView: View {
     }
 
     @ViewBuilder
-    private func speakerRow(index: Int, speaker: SpeakerInfo) -> some View {
+    private func speakerRow(
+        index: Int,
+        speaker: (label: String, autoName: String?, speakingTime: Double)
+    ) -> some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -156,13 +165,13 @@ struct SpeakerNamingView: View {
                         .font(.subheadline)
                         .fontWeight(.medium)
                     Spacer()
-                    Text("(\(formattedTime(speaker.speakingTimeSeconds)))")
+                    Text("(\(formattedTime(speaker.speakingTime)))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 if let autoName = speaker.autoName {
-                    Text("Auto: \(autoName) (\(Int(speaker.confidence * 100))%)")
+                    Text("Auto: \(autoName)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -171,45 +180,27 @@ struct SpeakerNamingView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                HStack(spacing: 8) {
-                    Button {
-                        playSample(speaker: speaker)
-                    } label: {
-                        Label("Play", systemImage: "play.fill")
-                    }
-                    .controlSize(.small)
-
-                    if index < names.count {
-                        AccessibleTextField(
-                            text: $names[index],
-                            placeholder: "Name",
-                            identifier: "speaker-name-\(speaker.label)"
-                        )
-                    }
+                if index < names.count {
+                    AccessibleTextField(
+                        text: $names[index],
+                        placeholder: "Name",
+                        identifier: "speaker-name-\(speaker.label)"
+                    )
                 }
             }
             .padding(4)
         }
     }
 
-    private func playSample(speaker: SpeakerInfo) {
-        let url = sampleURL(baseDir: request.audioSamplesDir, sampleFile: speaker.sampleFile)
-
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-
-        do {
-            audioPlayer = try AVAudioPlayer(contentsOf: url)
-            audioPlayer?.play()
-        } catch {
-            print("Failed to play sample: \(error)")
-        }
-    }
-
     private func confirm() {
-        guard names.count == request.speakers.count else {
-            onComplete([:])
-            return
+        var mapping: [String: String] = [:]
+        for (index, speaker) in speakers.enumerated() {
+            let name = index < names.count
+                ? names[index].trimmingCharacters(in: .whitespaces) : ""
+            if !name.isEmpty {
+                mapping[speaker.label] = name
+            }
         }
-        onComplete(buildSpeakerMapping(names: names, speakers: request.speakers))
+        onComplete(mapping)
     }
 }
