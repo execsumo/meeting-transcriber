@@ -4,7 +4,7 @@
 
 Native SwiftUI menu bar application that orchestrates meeting detection, recording, transcription, diarization, and protocol generation. Runs a background watch loop (`WatchLoop`) polling for active meetings and implementing a complete end-to-end pipeline.
 
-**Key pattern:** Observable state models (`@Observable`) with file-based IPC for cross-process communication.
+**Key pattern:** Observable state models (`@Observable`) with PipelineQueue for decoupled post-processing.
 
 ---
 
@@ -15,7 +15,7 @@ Meeting Window Detected (CGWindowListCopyWindowInfo)
   → DualSourceRecorder (audiotap + mic)
     → AudioMixer (resample 48kHz → 16kHz)
       → WhisperKit (CoreML/ANE transcription)
-        → [DiarizationProcess (pyannote subprocess)]
+        → [FluidDiarizer (CoreML/ANE speaker diarization)]
           → ProtocolGenerator (Claude CLI)
             → Markdown protocol + transcript
 ```
@@ -32,19 +32,22 @@ Meeting Window Detected (CGWindowListCopyWindowInfo)
 | `MenuBarView.swift` | Menu bar dropdown (state, actions, meeting info) |
 | `SettingsView.swift` | Settings window (apps, recording, transcription, diarization) |
 | `SpeakerNamingView.swift` | Speaker naming dialog after diarization |
-| `SpeakerCountView.swift` | Speaker count selection dialog |
 | `AppSettings.swift` | `@Observable` settings persisted to UserDefaults |
 
 ### Core Pipeline
 
 | File | Role |
 |------|------|
-| `WatchLoop.swift` | Main orchestrator: detect → record → transcribe → diarize → protocol |
+| `WatchLoop.swift` | Main orchestrator: detect → record → enqueue PipelineJob |
 | `MeetingDetector.swift` | Window polling, pattern matching, confirmation counting, cooldown |
 | `MeetingPatterns.swift` | Regex patterns for Teams, Zoom, Webex |
 | `DualSourceRecorder.swift` | Orchestrates audiotap + mic, mixes tracks |
 | `WhisperKitEngine.swift` | Native WhisperKit transcription (single/dual-source/segments) |
-| `DiarizationProcess.swift` | Python subprocess for pyannote speaker identification |
+| `PipelineQueue.swift` | Decouples recording from post-processing, sequential job pipeline |
+| `PipelineJob.swift` | Pipeline job model (waiting → transcribing → diarizing → generatingProtocol → done) |
+| `FluidDiarizer.swift` | On-device speaker diarization via FluidAudio CoreML/ANE |
+| `SpeakerMatcher.swift` | Speaker embedding DB + cosine similarity matching |
+| `DiarizationProcess.swift` | Diarization result types, DiarizationProvider protocol, speaker assignment algorithms (standard + hybrid) |
 | `ProtocolGenerator.swift` | Claude CLI invocation, stream-json parsing |
 
 ### Audio Processing
@@ -61,10 +64,10 @@ Meeting Window Detected (CGWindowListCopyWindowInfo)
 | File | Role |
 |------|------|
 | `TranscriberStatus.swift` | Status + state enum models |
-| `IPCManager.swift` | JSON file-based IPC for speaker dialogs |
-| `SpeakerRequest.swift` | Speaker IPC data models |
+| `AppPaths.swift` | Centralized path constants (ipcDir, dataDir, logSubsystem, speakersDB) |
+| `AXHelper.swift` | Shared accessibility API helper (MuteDetector + ParticipantReader) |
 | `NotificationManager.swift` | macOS notifications |
-| `KeychainHelper.swift` | Keychain CRUD for HF token |
+| `KeychainHelper.swift` | Legacy keychain CRUD (token now file-based) |
 | `Permissions.swift` | Mic/accessibility permissions, project root detection |
 | `ParticipantReader.swift` | Teams participant extraction via Accessibility API |
 
@@ -73,11 +76,12 @@ Meeting Window Detected (CGWindowListCopyWindowInfo)
 ## State Machine
 
 ```
-idle → watching → recording → transcribing → [diarizing] → generatingProtocol → done (30s) → watching
-                                                                                  ↳ error (30s) → watching
+WatchLoop:     idle → watching → recording → watching (enqueues PipelineJob)
+PipelineQueue: waiting → transcribing → [diarizing] → generatingProtocol → done (60s auto-remove)
+                                                                            ↳ error
 ```
 
-**Transitions** are observable via `WatchLoop.state` and trigger:
+**Transitions** are observable via `WatchLoop.state` and `PipelineQueue.jobs`, triggering:
 - Menu bar icon/label updates
 - macOS notifications (recording started, protocol ready, error)
 
@@ -146,34 +150,37 @@ WhisperKit requires 16kHz mono input. Both app and mic tracks are resampled befo
 
 ## Diarization
 
-### Flow
+### FluidDiarizer (On-device)
 
-```
-DiarizationProcess.isAvailable?
-  → Bundle: Resources/python-diarize/
-  → Dev mode: .venv/bin/python + tools/diarize/diarize.py
+On-device speaker diarization using FluidAudio (CoreML/ANE). No HuggingFace token or Python subprocess needed. Models downloaded automatically on first run (~50 MB).
 
-diarize.py <mix_16k.wav> --speakers N --ipc-dir ~/.meeting-transcriber/ --meeting-title "..."
-  → JSON output: { segments, speaking_times, auto_names }
+Flow: `FluidDiarizer.run(audioPath, numSpeakers)` → `OfflineDiarizerManager` → `DiarizationResult` with segments, speaking times, and speaker embeddings.
 
-DiarizationProcess.assignSpeakers(transcript, diarization)
-  → Maximum temporal overlap matching
-  → Each transcript segment gets best-matching speaker label
-```
+### Speaker Matching
 
-### Speaker Assignment Algorithm
+`SpeakerMatcher` matches diarization speaker embeddings against a persistent speaker database (`speakers.json`) using cosine similarity (threshold: 0.65). Enables recognition of returning speakers across meetings.
+
+### Speaker Assignment
 
 For each transcript segment, find the diarization segment with the longest temporal overlap:
 ```
 overlap = max(0, min(seg.end, dSeg.end) - max(seg.start, dSeg.start))
 ```
-Segment inherits speaker label of the diarization segment with maximum overlap. No overlap → "UNKNOWN".
+No overlap → nearest-segment fallback by gap distance. Only if no diarization segments exist → "UNKNOWN".
 
-### IPC for Speaker Dialogs
+### Hybrid Dual-Source Diarization
 
-Python writes JSON to `~/.meeting-transcriber/`:
-1. `speaker_count_request.json` → App shows count dialog → `speaker_count_response.json`
-2. `speaker_request.json` → App shows naming dialog → `speaker_response.json`
+When dual-source recording (app + mic) is available with a mic label:
+1. Transcribe app/mic tracks separately → "Remote" / micLabel segments
+2. Run FluidAudio diarization on mixed audio
+3. `identifyMicSpeaker()` — correlate mic segments with diarization speakers by temporal overlap
+4. `preMatchParticipants()` — heuristic assignment of Teams participants to unmatched speakers by speaking time
+5. Speaker naming UI — mic speaker row locked, others editable with participant suggestions
+6. `assignSpeakersHybrid()` — mic segments keep micLabel, app segments get diarization names (mic speaker excluded)
+
+### Speaker Naming UI
+
+`SpeakerNamingView` shown when diarization finds speakers. Each row shows label, auto-matched name, speaking time, and audio playback. In hybrid mode, mic speaker row is locked (mic icon, non-editable). Supports re-run with different speaker count.
 
 ---
 
@@ -216,9 +223,11 @@ Python writes JSON to `~/.meeting-transcriber/`:
 ```
 AppSettings (UserDefaults)
   → WatchLoop (@Observable: state, detail, currentMeeting, lastError)
+  → PipelineQueue (@Observable: jobs, isProcessing, pendingSpeakerNaming)
     → MeetingTranscriberApp (computed: currentStatus, currentStateLabel, currentStateIcon)
-      → MenuBarView (receives status + callbacks)
+      → MenuBarView (receives status + callbacks + pipeline queue)
       → SettingsView (receives @Bindable settings)
+      → SpeakerNamingView (receives pendingSpeakerNaming data)
 ```
 
 ### File Locations
@@ -228,10 +237,10 @@ AppSettings (UserDefaults)
 | Recordings | `~/Library/Application Support/MeetingTranscriber/recordings/` |
 | Protocols | `~/Library/Application Support/MeetingTranscriber/protocols/` |
 | IPC | `~/.meeting-transcriber/` |
-| Bundle diarize | `MeetingTranscriber.app/Contents/Resources/python-diarize/` |
+| Speaker DB | `~/Library/Application Support/MeetingTranscriber/speakers.json` |
+| Pipeline logs | `~/.meeting-transcriber/pipeline_queue.json`, `pipeline_log.jsonl` |
 | Bundle audiotap | `MeetingTranscriber.app/Contents/Resources/audiotap` |
 | Dev audiotap | `tools/audiotap/.build/release/audiotap` |
-| Dev diarize | `tools/diarize/diarize.py` |
 
 ---
 
@@ -241,9 +250,10 @@ AppSettings (UserDefaults)
 |-----------|----------------|
 | MeetingDetector | `windowListProvider` closure (mock window list) |
 | MuteDetector | `muteStateProvider` closure |
-| DiarizationProcess | `pythonPath`, `scriptPath`, `ipcDir` constructor params |
+| DiarizationProvider | `diarizationFactory` closure in PipelineQueue |
+| ProtocolGenerating | `protocolGenerator` protocol in PipelineQueue |
+| RecordingProvider | `recorderFactory` closure in WatchLoop |
 | ProtocolGenerator | `claudeBin` parameter |
-| IPCManager | `baseDir` parameter |
 
 ---
 
@@ -261,9 +271,11 @@ AppSettings (UserDefaults)
 ## Key Architectural Decisions
 
 1. **@Observable over @StateObject** — Fine-grained reactivity, macOS 14+
-2. **File-based IPC** — Decouples Python diarization from Swift UI without tight coupling
+2. **PipelineQueue decoupling** — Recording and post-processing run independently; WatchLoop enqueues jobs and resumes watching
 3. **audiotap as separate binary** — Process isolation for real-time audio callback
 4. **Dual-source recording** — Enables speaker separation without diarization (app=Remote, mic=Me)
 5. **Graceful degradation** — Diarization optional, mute detection optional, continues on partial failure
 6. **Pre-loaded model** — WhisperKit loaded at app launch, prevents delay on first meeting
-7. **60s cooldown** — Prevents re-detecting same meeting window after handling
+7. **5s cooldown** — Prevents re-detecting same meeting after handling
+8. **FluidAudio on-device diarization** — Replaces Python pyannote subprocess, no external dependencies
+9. **Hybrid diarization** — Dual-source recording identifies local speaker reliably, FluidAudio distinguishes remote speakers
