@@ -175,17 +175,17 @@ struct MeetingTranscriberApp: App {
                         noMic: settings.noMic
                     )
 
-                    loop.onStateChange = { [notifications] _, newState in
+                    loop.onStateChange = { [weak loop, notifications] _, newState in
                         switch newState {
                         case .recording:
-                            if let meeting = loop.currentMeeting {
+                            if let meeting = loop?.currentMeeting {
                                 notifications.notify(
                                     title: "Meeting Detected",
                                     body: "Recording: \(meeting.windowTitle)"
                                 )
                             }
                         case .error:
-                            if let err = loop.lastError {
+                            if let err = loop?.lastError {
                                 notifications.notify(title: "Error", body: err)
                             }
                         default:

@@ -51,8 +51,13 @@ class MeetingDetector {
         var meeting: [String: [NSRegularExpression]] = [:]
         var idle: [String: [NSRegularExpression]] = [:]
         for p in patterns {
-            meeting[p.appName] = p.meetingPatterns.compactMap { try? NSRegularExpression(pattern: $0) }
-            idle[p.appName] = p.idlePatterns.compactMap { try? NSRegularExpression(pattern: $0) }
+            meeting[p.appName] = p.meetingPatterns.map { pattern in
+                // These are compile-time constant patterns; a crash here indicates a bug in the pattern definition
+                try! NSRegularExpression(pattern: pattern)
+            }
+            idle[p.appName] = p.idlePatterns.map { pattern in
+                try! NSRegularExpression(pattern: pattern)
+            }
         }
         self.compiledMeetingPatterns = meeting
         self.compiledIdlePatterns = idle

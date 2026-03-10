@@ -93,6 +93,7 @@ class WatchLoop {
                 do {
                     try await handleMeeting(meeting)
                 } catch {
+                    if error is CancellationError { return }
                     let msg = "Recording error: \(error)"
                     logger.error("\(msg)")
                     lastError = error.localizedDescription

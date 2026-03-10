@@ -103,14 +103,11 @@ struct ParticipantReader {
 
         guard let json = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted]) else { return }
 
-        let tmp = ipcDir.appendingPathComponent("participants.json.tmp")
         do {
-            try json.write(to: tmp, options: .atomic)
-            try FileManager.default.moveItem(at: tmp, to: participantsFile)
+            try json.write(to: participantsFile, options: .atomic)
         } catch {
-            // moveItem fails if destination exists
-            try? FileManager.default.removeItem(at: participantsFile)
-            try? FileManager.default.moveItem(at: tmp, to: participantsFile)
+            logger.error("Failed to write participants: \(error.localizedDescription)")
+            return
         }
         logger.info("Wrote \(names.count) participants to \(participantsFile.path)")
     }
