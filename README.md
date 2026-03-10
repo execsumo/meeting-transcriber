@@ -1,6 +1,6 @@
 # Meeting Transcriber
 
-[![CI](https://github.com/meanstone/Transcriber/actions/workflows/ci.yml/badge.svg)](https://github.com/meanstone/Transcriber/actions/workflows/ci.yml)
+[![CI](https://github.com/pasrom/meeting-transcriber/actions/workflows/ci.yml/badge.svg)](https://github.com/pasrom/meeting-transcriber/actions/workflows/ci.yml)
 
 A native macOS menu bar app that automatically detects, records, transcribes, and summarizes your meetings — fully on-device, no cloud transcription.
 
@@ -45,7 +45,7 @@ brew install --cask meeting-transcriber
 ### Build from source
 
 ```bash
-git clone https://github.com/meanstone/Transcriber
+git clone https://github.com/pasrom/meeting-transcriber
 cd Transcriber
 ./scripts/build_audiotap.sh
 cd app/MeetingTranscriber && swift build -c release
