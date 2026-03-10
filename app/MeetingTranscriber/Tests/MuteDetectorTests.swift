@@ -4,6 +4,7 @@ import XCTest
 
 // MARK: - MuteDetector Tests
 
+@MainActor
 final class MuteDetectorTests: XCTestCase {
     func testInitialState() {
         let detector = MuteDetector(teamsPID: 1234)

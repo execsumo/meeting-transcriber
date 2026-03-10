@@ -15,12 +15,14 @@ struct RecordingResult {
 }
 
 /// Abstraction for recording, enabling mock injection in tests.
+@MainActor
 protocol RecordingProvider {
     func start(appPID: pid_t, noMic: Bool, micDeviceUID: String?) throws
     func stop() throws -> RecordingResult
 }
 
 /// Orchestrates audiotap (app audio) + mic recording, then mixes.
+@MainActor
 @Observable
 class DualSourceRecorder: RecordingProvider {
     private var audiotapProcess: Process?

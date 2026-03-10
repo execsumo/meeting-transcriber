@@ -2,6 +2,7 @@ import XCTest
 
 @testable import MeetingTranscriber
 
+@MainActor
 final class TimestampedSegmentTests: XCTestCase {
 
     // MARK: - Timestamp Formatting

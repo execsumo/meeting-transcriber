@@ -3,6 +3,7 @@ import XCTest
 
 @testable import MeetingTranscriber
 
+@MainActor
 final class SettingsViewTests: XCTestCase {
 
     // MARK: - View rendering

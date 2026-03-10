@@ -3,6 +3,7 @@ import XCTest
 
 @testable import MeetingTranscriber
 
+@MainActor
 final class WhisperKitE2ETests: XCTestCase {
 
     // MARK: - stripWhisperTokens (no model needed, always run)

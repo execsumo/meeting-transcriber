@@ -31,6 +31,7 @@ extension TimestampedSegment {
     }
 }
 
+@MainActor
 @Observable
 final class WhisperKitEngine {
     var modelVariant = "openai_whisper-large-v3-v20240930_turbo"
@@ -55,7 +56,7 @@ final class WhisperKitEngine {
                 let modelFolder = try await WhisperKit.download(
                     variant: modelVariant,
                     progressCallback: { progress in
-                        Task { @MainActor in
+                        Task {
                             self.downloadProgress = progress.fractionCompleted
                         }
                     }

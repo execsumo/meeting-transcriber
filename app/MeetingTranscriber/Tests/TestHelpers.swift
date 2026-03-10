@@ -4,6 +4,7 @@ import Foundation
 // MARK: - Shared Mock Classes
 
 /// Mock recorder that returns a pre-prepared fixture WAV as the recording result.
+@MainActor
 class MockRecorder: RecordingProvider {
     var mixPath: URL?
     var appPath: URL?

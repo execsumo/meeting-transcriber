@@ -14,6 +14,7 @@ struct MuteTransition: Sendable {
 ///
 /// The timeline can later be used to mask mic audio during muted periods.
 /// Graceful degradation: if Accessibility is unavailable, records empty timeline.
+@MainActor
 @Observable
 class MuteDetector {
     private(set) var timeline: [MuteTransition] = []
@@ -40,7 +41,7 @@ class MuteDetector {
         isActive = true
         logger.info("Mute tracker started for PID \(self.teamsPID)")
 
-        task = Task.detached(priority: .utility) { [weak self] in
+        task = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
 
@@ -56,10 +57,8 @@ class MuteDetector {
                         timestamp: ProcessInfo.processInfo.systemUptime,
                         isMuted: state
                     )
-                    await MainActor.run {
-                        self.timeline.append(transition)
-                        self.lastState = state
-                    }
+                    self.timeline.append(transition)
+                    self.lastState = state
                     logger.debug("Mute transition: \(state ? "MUTED" : "UNMUTED")")
                 }
 
