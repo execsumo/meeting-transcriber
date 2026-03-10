@@ -142,15 +142,16 @@ final class WhisperKitEngine {
         return segments
     }
 
-    /// Transcribe app and mic audio separately, then merge by timestamp.
+    /// Transcribe app and mic audio separately, label and merge by timestamp.
     ///
     /// Labels mic segments with `micLabel` and app segments as "Remote".
-    func transcribeDualSource(
+    /// Returns structured segments for downstream processing (e.g. diarization).
+    func transcribeDualSourceSegments(
         appAudio: URL,
         micAudio: URL,
         micDelay: TimeInterval = 0,
         micLabel: String = "Me"
-    ) async throws -> String {
+    ) async throws -> [TimestampedSegment] {
         // Transcribe both tracks
         var appSegments = try await transcribeSegments(audioPath: appAudio)
         var micSegments = try await transcribeSegments(audioPath: micAudio)
@@ -172,8 +173,26 @@ final class WhisperKitEngine {
         for i in micSegments.indices { micSegments[i].speaker = micLabel }
 
         // Merge by start timestamp
-        let merged = Self.mergeSegments(appSegments, micSegments)
-        return merged.map(\.formattedLine).joined(separator: "\n")
+        return Self.mergeSegments(appSegments, micSegments)
+    }
+
+    /// Transcribe app and mic audio separately, then merge by timestamp.
+    ///
+    /// Labels mic segments with `micLabel` and app segments as "Remote".
+    /// Returns formatted string with `[MM:SS] Speaker: text` lines.
+    func transcribeDualSource(
+        appAudio: URL,
+        micAudio: URL,
+        micDelay: TimeInterval = 0,
+        micLabel: String = "Me"
+    ) async throws -> String {
+        let segments = try await transcribeDualSourceSegments(
+            appAudio: appAudio,
+            micAudio: micAudio,
+            micDelay: micDelay,
+            micLabel: micLabel
+        )
+        return segments.map(\.formattedLine).joined(separator: "\n")
     }
 
     /// Merge two segment arrays sorted by start timestamp.

@@ -124,4 +124,136 @@ final class TimestampedSegmentTests: XCTestCase {
         let output = merged.map(\.formattedLine).joined(separator: "\n")
         XCTAssertEqual(output, "[00:00] Remote: Hello\n[00:05] Me: Hi there")
     }
+
+    // MARK: - Dual Source Segments (label + merge + delay logic)
+
+    /// Simulate what transcribeDualSourceSegments does: label app as "Remote",
+    /// mic as micLabel, apply mic delay, and merge by timestamp.
+    private func simulateDualSourceSegments(
+        appSegments: [TimestampedSegment],
+        micSegments: [TimestampedSegment],
+        micDelay: TimeInterval = 0,
+        micLabel: String = "Me"
+    ) -> [TimestampedSegment] {
+        var app = appSegments
+        var mic = micSegments
+
+        // Shift mic timestamps by delay
+        if micDelay != 0 {
+            mic = mic.map { seg in
+                TimestampedSegment(
+                    start: seg.start + micDelay,
+                    end: seg.end + micDelay,
+                    text: seg.text,
+                    speaker: seg.speaker
+                )
+            }
+        }
+
+        // Label speakers
+        for i in app.indices { app[i].speaker = "Remote" }
+        for i in mic.indices { mic[i].speaker = micLabel }
+
+        return WhisperKitEngine.mergeSegments(app, mic)
+    }
+
+    func testDualSourceSegmentsLabelsRemoteAndMic() {
+        let appSegs = [TimestampedSegment(start: 0, end: 5, text: "Hello from app")]
+        let micSegs = [TimestampedSegment(start: 2, end: 7, text: "Hello from mic")]
+
+        let result = simulateDualSourceSegments(appSegments: appSegs, micSegments: micSegs)
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].speaker, "Remote")
+        XCTAssertEqual(result[0].text, "Hello from app")
+        XCTAssertEqual(result[1].speaker, "Me")
+        XCTAssertEqual(result[1].text, "Hello from mic")
+    }
+
+    func testDualSourceSegmentsCustomMicLabel() {
+        let appSegs = [TimestampedSegment(start: 0, end: 5, text: "App")]
+        let micSegs = [TimestampedSegment(start: 1, end: 6, text: "Mic")]
+
+        let result = simulateDualSourceSegments(
+            appSegments: appSegs, micSegments: micSegs, micLabel: "Alice"
+        )
+
+        XCTAssertEqual(result[1].speaker, "Alice")
+    }
+
+    func testDualSourceSegmentsMicDelayShiftsTimestamps() {
+        let appSegs = [TimestampedSegment(start: 0, end: 5, text: "App")]
+        let micSegs = [TimestampedSegment(start: 0, end: 5, text: "Mic")]
+
+        let result = simulateDualSourceSegments(
+            appSegments: appSegs, micSegments: micSegs, micDelay: 3.0
+        )
+
+        // App at 0, mic shifted to 3
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].text, "App")
+        XCTAssertEqual(result[0].start, 0)
+        XCTAssertEqual(result[1].text, "Mic")
+        XCTAssertEqual(result[1].start, 3.0)
+        XCTAssertEqual(result[1].end, 8.0)
+    }
+
+    func testDualSourceSegmentsNegativeMicDelay() {
+        let appSegs = [TimestampedSegment(start: 5, end: 10, text: "App")]
+        let micSegs = [TimestampedSegment(start: 7, end: 12, text: "Mic")]
+
+        let result = simulateDualSourceSegments(
+            appSegments: appSegs, micSegments: micSegs, micDelay: -2.0
+        )
+
+        // Mic shifted from 7 to 5 — same start as app
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].start, 5.0)
+        XCTAssertEqual(result[1].start, 5.0)
+        // Both at same timestamp, mic end shifted to 10
+        XCTAssertEqual(result[1].end, 10.0)
+    }
+
+    func testDualSourceSegmentsZeroDelayNoShift() {
+        let micSegs = [TimestampedSegment(start: 3, end: 8, text: "Mic")]
+
+        let result = simulateDualSourceSegments(
+            appSegments: [], micSegments: micSegs, micDelay: 0
+        )
+
+        XCTAssertEqual(result[0].start, 3.0)
+        XCTAssertEqual(result[0].end, 8.0)
+    }
+
+    func testDualSourceSegmentsMergesInterleaved() {
+        let appSegs = [
+            TimestampedSegment(start: 0, end: 3, text: "A1"),
+            TimestampedSegment(start: 6, end: 9, text: "A2"),
+        ]
+        let micSegs = [
+            TimestampedSegment(start: 3, end: 6, text: "M1"),
+            TimestampedSegment(start: 9, end: 12, text: "M2"),
+        ]
+
+        let result = simulateDualSourceSegments(appSegments: appSegs, micSegments: micSegs)
+
+        XCTAssertEqual(result.map(\.text), ["A1", "M1", "A2", "M2"])
+        XCTAssertEqual(result.map(\.speaker), ["Remote", "Me", "Remote", "Me"])
+    }
+
+    func testDualSourceSegmentsEmptyBothSources() {
+        let result = simulateDualSourceSegments(appSegments: [], micSegments: [])
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testDualSourceSegmentsFormattedOutputMatchesDualSource() {
+        // Verify that formatting segments produces the same output as transcribeDualSource would
+        let appSegs = [TimestampedSegment(start: 0, end: 5, text: "Hello")]
+        let micSegs = [TimestampedSegment(start: 5, end: 10, text: "Hi there")]
+
+        let segments = simulateDualSourceSegments(appSegments: appSegs, micSegments: micSegs)
+        let output = segments.map(\.formattedLine).joined(separator: "\n")
+
+        XCTAssertEqual(output, "[00:00] Remote: Hello\n[00:05] Me: Hi there")
+    }
 }
