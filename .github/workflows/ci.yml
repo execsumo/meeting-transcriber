@@ -13,7 +13,14 @@ concurrency:
 jobs:
   swift-test:
     runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: app/MeetingTranscriber/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('app/MeetingTranscriber/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
       - name: Swift tests
         run: cd app/MeetingTranscriber && swift test
