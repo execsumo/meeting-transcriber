@@ -27,7 +27,8 @@ protocol RecordingProvider {
 class DualSourceRecorder: RecordingProvider {
     private var audiotapProcess: Process?
     private var muteDetector: MuteDetector?
-    private var appAudioFrames: [Data] = []
+    private var appAudioFileHandle: FileHandle?
+    private var appAudioTempURL: URL?
     private var readerTask: Task<Void, Never>?
     private(set) var isRecording = false
     private(set) var recordingStartTime: TimeInterval = 0
@@ -111,7 +112,11 @@ class DualSourceRecorder: RecordingProvider {
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
 
-        appAudioFrames = []
+        // Stream app audio to temp file instead of accumulating in RAM
+        let tempURL = recDir.appendingPathComponent("\(ts)_app_raw.tmp")
+        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        appAudioTempURL = tempURL
+        appAudioFileHandle = try FileHandle(forWritingTo: tempURL)
 
         try proc.run()
         audiotapProcess = proc
@@ -120,15 +125,14 @@ class DualSourceRecorder: RecordingProvider {
 
         logger.info("Recording started: PID \(appPID), \(self.recordRate) Hz, \(self.appChannels)ch")
 
-        // Read stdout in background
-        readerTask = Task.detached { [weak self] in
+        // Stream stdout to temp file in background
+        let writeHandle = appAudioFileHandle!
+        readerTask = Task.detached {
             let handle = stdoutPipe.fileHandleForReading
             while !Task.isCancelled {
                 let data = handle.availableData
                 if data.isEmpty { break }
-                await MainActor.run {
-                    self?.appAudioFrames.append(data)
-                }
+                writeHandle.write(data)
             }
         }
 
@@ -198,13 +202,20 @@ class DualSourceRecorder: RecordingProvider {
         let ts = startTimestamp ?? Self.timestamp()
         startTimestamp = nil
 
-        // ── Convert app audio frames to Float32 mono ──
+        // ── Convert app audio from temp file to Float32 mono ──
         var appPath: URL?
         var appSamples: [Float] = []
-        if !appAudioFrames.isEmpty {
-            var raw = Data()
-            for frame in appAudioFrames { raw.append(frame) }
-            appAudioFrames = []
+
+        // Close file handle and read back
+        appAudioFileHandle?.closeFile()
+        appAudioFileHandle = nil
+        let tempURL = appAudioTempURL
+        appAudioTempURL = nil
+
+        if let tempURL, FileManager.default.fileExists(atPath: tempURL.path),
+           (try? FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int) ?? 0 > 0 {
+            let raw = try Data(contentsOf: tempURL)
+            try? FileManager.default.removeItem(at: tempURL)
 
             let floatCount = raw.count / MemoryLayout<Float>.size
             var floats = [Float](repeating: 0, count: floatCount)
