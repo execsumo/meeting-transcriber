@@ -61,7 +61,8 @@ speakers.json              # Saved voice profiles (gitignored, created at runtim
 ## Pipeline
 
 ```
-App audio (audiotap/CATapDescription) + Microphone → mix → 16kHz mono WAV → WhisperKit (CoreML/ANE) → FluidAudio diarization (CoreML/ANE) → Claude CLI → Markdown protocol
+Dual-source: App audio + Mic → separate 16kHz WAVs → WhisperKit per track → FluidAudio diarization per track (CoreML/ANE) → merge speakers → Claude CLI → Markdown protocol
+Single-source: Audio → 16kHz mono WAV → WhisperKit → FluidAudio diarization → Claude CLI → Markdown protocol
 ```
 
 ## Setup
@@ -138,7 +139,8 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
 
 **Diarization:**
 - `FluidDiarizer` uses FluidAudio (CoreML/ANE) for on-device speaker diarization — no HuggingFace token needed.
-- `SpeakerMatcher` stores speaker embeddings in `speakers.json` and matches via cosine similarity.
+- **Dual-track diarization:** App and mic tracks are diarized separately. Speaker IDs are prefixed (`R_` for remote/app, `M_` for mic/local), merged, and assigned via `assignSpeakersDualTrack`. Single-source recordings fall back to diarizing the mix with `assignSpeakers`.
+- `SpeakerMatcher` stores speaker embeddings in `speakers.json` and matches via cosine similarity (multi-embedding, max 5 per speaker, confidence margin 0.10).
 - `DiarizationProvider` protocol enables mock injection in tests.
 
 ## Critical Notes
