@@ -339,6 +339,46 @@ final class MeetingDetectorTests: XCTestCase {
         XCTAssertEqual(result?.pattern.appName, "Zoom")
     }
 
+    // MARK: - Coverage: Edge Cases
+
+    func testDuplicateWindowsSameAppCountOnce() {
+        // Two matching windows from same app should only count as one hit (line 79)
+        let detector = MeetingDetector(patterns: [.teams], confirmationCount: 2)
+        detector.windowListProvider = {
+            [
+                makeWindow(owner: "Microsoft Teams", name: "Meeting A | Microsoft Teams"),
+                makeWindow(owner: "Microsoft Teams", name: "Meeting B | Microsoft Teams"),
+            ]
+        }
+
+        // First poll: count=1 (not 2, because duplicate guard)
+        XCTAssertNil(detector.checkOnce())
+        // Second poll: count=2 → confirmed
+        XCTAssertNotNil(detector.checkOnce())
+    }
+
+    func testWindowWithoutBoundsPassesSizeCheck() {
+        // Window dict missing kCGWindowBounds — size check skipped (lines 146-148)
+        let detector = MeetingDetector(patterns: [.teams], confirmationCount: 1)
+        let window: [String: Any] = [
+            "kCGWindowOwnerName": "Microsoft Teams",
+            "kCGWindowName": "Sprint Review | Microsoft Teams",
+            "kCGWindowOwnerPID": Int32(1234),
+            // no kCGWindowBounds
+        ]
+        detector.windowListProvider = { [window] }
+        XCTAssertNotNil(detector.checkOnce())
+    }
+
+    func testTitleNotMatchingAnyMeetingPattern() {
+        // Title passes owner + idle checks but doesn't match meeting regex (lines 170-171)
+        let detector = MeetingDetector(patterns: [.teams], confirmationCount: 1)
+        detector.windowListProvider = {
+            [makeWindow(owner: "Microsoft Teams", name: "Some Random Title")]
+        }
+        XCTAssertNil(detector.checkOnce())
+    }
+
     func testResetWithoutAppNameNoCooldown() {
         let detector = MeetingDetector(patterns: [.teams], confirmationCount: 1)
         let windows = [
