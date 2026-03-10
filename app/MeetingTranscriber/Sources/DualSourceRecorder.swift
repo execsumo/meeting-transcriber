@@ -264,50 +264,29 @@ class DualSourceRecorder: RecordingProvider {
             }
         }
 
-        // ── Apply mute mask ──
-        if !muteTimeline.isEmpty && !micSamples.isEmpty {
-            AudioMixer.applyMuteMask(
-                samples: &micSamples,
-                timeline: muteTimeline,
-                sampleRate: recordRate,
+        // ── Mix via AudioMixer ──
+        let mixPath = recDir.appendingPathComponent("\(ts)_mix.wav")
+
+        if let app = appPath, let mic = micPath {
+            // Delegate mute masking, echo suppression, delay alignment, and mixing
+            try AudioMixer.mix(
+                appAudioPath: app,
+                micAudioPath: mic,
+                outputPath: mixPath,
                 micDelay: micDelay,
-                recordingStart: recordingStart
+                muteTimeline: muteTimeline,
+                recordingStart: recordingStart,
+                sampleRate: recordRate
             )
-        }
-
-        // ── Echo suppression ──
-        if !appSamples.isEmpty && !micSamples.isEmpty {
-            AudioMixer.suppressEcho(
-                appSamples: appSamples,
-                micSamples: &micSamples,
-                sampleRate: recordRate,
-                micDelay: micDelay
-            )
-        }
-
-        // ── Delay alignment ──
-        if micDelay > 0 {
-            let delaySamples = Int(micDelay * Double(recordRate))
-            if delaySamples > 0 && delaySamples < micSamples.count {
-                micSamples = [Float](repeating: 0, count: delaySamples) + micSamples
-            }
-        } else if micDelay < 0 {
-            let delaySamples = Int(-micDelay * Double(recordRate))
-            if delaySamples > 0 && delaySamples < appSamples.count {
-                appSamples = [Float](repeating: 0, count: delaySamples) + appSamples
-            }
-        }
-
-        // ── Mix ──
-        let mixed = AudioMixer.mixTracks(appSamples, micSamples)
-
-        guard !mixed.isEmpty else {
+        } else if !appSamples.isEmpty {
+            try AudioMixer.saveWAV(samples: appSamples, sampleRate: recordRate, url: mixPath)
+        } else if !micSamples.isEmpty {
+            try AudioMixer.saveWAV(samples: micSamples, sampleRate: recordRate, url: mixPath)
+        } else {
             throw RecorderError.noAudioData
         }
 
-        let mixPath = recDir.appendingPathComponent("\(ts)_mix.wav")
-        try AudioMixer.saveWAV(samples: mixed, sampleRate: recordRate, url: mixPath)
-        logger.info("Mix saved: \(mixPath.lastPathComponent) (\(Double(mixed.count) / Double(self.recordRate))s)")
+        logger.info("Mix saved: \(mixPath.lastPathComponent)")
 
         return RecordingResult(
             mixPath: mixPath,

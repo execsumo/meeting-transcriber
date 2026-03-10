@@ -122,13 +122,18 @@ struct SettingsView: View {
                     Label("Model ready", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.caption)
-                case .unloaded:
+                case .unloaded, .unloading:
                     Button("Load Model") {
                         whisperKitEngine.modelVariant = settings.whisperKitModel
                         Task { await whisperKitEngine.loadModel() }
                     }
-                default:
-                    EmptyView()
+                case .prewarming, .prewarmed, .downloaded:
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text("Preparing model...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Toggle("Speaker Diarization", isOn: $settings.diarize)
@@ -192,7 +197,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: settings.diarize ? 610 : (settings.noMic ? 490 : 590))
+        .frame(width: 420)
         .onAppear {
             refreshPermissions()
         }

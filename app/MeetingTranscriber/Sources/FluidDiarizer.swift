@@ -23,8 +23,9 @@ class FluidDiarizer: DiarizationProvider {
             if let n = numSpeakers, n > 0 {
                 config = config.withSpeakers(exactly: n)
             }
-            manager = OfflineDiarizerManager(config: config)
-            try await manager!.prepareModels()
+            let newManager = OfflineDiarizerManager(config: config)
+            try await newManager.prepareModels()
+            manager = newManager
             currentNumSpeakers = numSpeakers
             logger.info("FluidAudio models ready")
         }
