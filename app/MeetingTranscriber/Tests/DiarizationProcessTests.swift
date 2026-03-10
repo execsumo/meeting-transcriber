@@ -248,6 +248,49 @@ final class DiarizationProcessTests: XCTestCase {
         XCTAssertEqual(result[2].speaker, "Max")     // app 10-15 overlaps R_SPEAKER_1
     }
 
+    func testMergeDualTrackDiarization_prefixesAutoNames() {
+        let appDiar = DiarizationResult(
+            segments: [.init(start: 0, end: 5, speaker: "SPEAKER_0")],
+            speakingTimes: ["SPEAKER_0": 5],
+            autoNames: ["SPEAKER_0": "Anna"],
+            embeddings: nil
+        )
+        let micDiar = DiarizationResult(
+            segments: [.init(start: 0, end: 3, speaker: "SPEAKER_0")],
+            speakingTimes: ["SPEAKER_0": 3],
+            autoNames: ["SPEAKER_0": "Roman"],
+            embeddings: nil
+        )
+
+        let merged = DiarizationProcess.mergeDualTrackDiarization(
+            appDiarization: appDiar, micDiarization: micDiar
+        )
+
+        XCTAssertEqual(merged.autoNames["R_SPEAKER_0"], "Anna")
+        XCTAssertEqual(merged.autoNames["M_SPEAKER_0"], "Roman")
+    }
+
+    func testMergeDualTrackDiarization_nilEmbeddingsBothSides() {
+        let appDiar = DiarizationResult(
+            segments: [.init(start: 0, end: 5, speaker: "S0")],
+            speakingTimes: ["S0": 5], autoNames: [:], embeddings: nil
+        )
+        let micDiar = DiarizationResult(
+            segments: [], speakingTimes: [:], autoNames: [:], embeddings: nil
+        )
+
+        let merged = DiarizationProcess.mergeDualTrackDiarization(
+            appDiarization: appDiar, micDiarization: micDiar
+        )
+
+        XCTAssertNil(merged.embeddings)
+    }
+
+    func testDiarizationErrorDescription() {
+        let error: DiarizationError = .notAvailable
+        XCTAssertEqual(error.errorDescription, "Diarization not available")
+    }
+
     func testAssignSpeakersDualTrack_noOverlapFallback() {
         let appSegments = [
             TimestampedSegment(start: 50, end: 55, text: "Far away"),
