@@ -10,3 +10,8 @@ tools/audiotap/.build/
 
 # Release build artifacts
 .build/
+
+# Python
+__pycache__/
+*.pyc
+.coverage
