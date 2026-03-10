@@ -364,6 +364,35 @@ final class SpeakerMatcherTests: XCTestCase {
         XCTAssertEqual(result["SPEAKER_0"], "SPEAKER_0")
     }
 
+    // MARK: - Cosine Distance Edge Cases
+
+    func testCosineDistanceEmptyVectors() {
+        let result = SpeakerMatcher.cosineDistance([], [])
+        XCTAssertEqual(result, 2, accuracy: 0.001)
+    }
+
+    func testCosineDistanceMismatchedLengths() {
+        let result = SpeakerMatcher.cosineDistance([1, 0], [1, 0, 0])
+        XCTAssertEqual(result, 2, accuracy: 0.001)
+    }
+
+    func testCosineDistanceZeroVector() {
+        let result = SpeakerMatcher.cosineDistance([0, 0, 0], [1, 0, 0])
+        XCTAssertEqual(result, 2, accuracy: 0.001)
+    }
+
+    // MARK: - StoredSpeaker Decoding Edge Cases
+
+    func testDecodeSpeakerWithNoEmbeddings() throws {
+        let json = """
+        [{"name":"Ghost"}]
+        """
+        let data = json.data(using: .utf8)!
+        let speakers = try JSONDecoder().decode([StoredSpeaker].self, from: data)
+        XCTAssertEqual(speakers[0].name, "Ghost")
+        XCTAssertTrue(speakers[0].embeddings.isEmpty)
+    }
+
     func testPreMatchParticipants_emptyParticipants() {
         // No participants → no change
         let mapping: [String: String] = [
