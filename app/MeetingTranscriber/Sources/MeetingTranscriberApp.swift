@@ -179,7 +179,7 @@ struct MeetingTranscriberApp: App {
         }
 
         Task {
-            await Permissions.ensureMicrophoneAccess()
+            _ = await Permissions.ensureMicrophoneAccess()
 
             ensurePipelineQueue()
 

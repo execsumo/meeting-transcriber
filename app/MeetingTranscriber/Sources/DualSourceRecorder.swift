@@ -153,11 +153,9 @@ class DualSourceRecorder: RecordingProvider {
 
         var args = [String(appPID), String(recordRate), String(appChannels)]
 
-        var micWavPath: URL?
         if !noMic {
             let micPath = recDir.appendingPathComponent("\(ts)_mic.wav")
             args += ["--mic", micPath.path]
-            micWavPath = micPath
             if let uid = micDeviceUID, !uid.isEmpty {
                 args += ["--mic-device", uid]
             }
