@@ -185,7 +185,7 @@ if [ -z "${HOMEBREW_TEMP:-}" ]; then
         xcrun notarytool submit "$DMG_PATH" \
             --apple-id "$APPLE_ID" \
             --team-id "$TEAM_ID" \
-            --password @env:APP_PASSWORD
+            --password "$APP_PASSWORD"
 
         echo "  DMG submitted for notarization (no --wait, no staple)"
         echo "  Gatekeeper will verify online when users open the DMG"
