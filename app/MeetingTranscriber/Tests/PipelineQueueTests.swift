@@ -260,6 +260,43 @@ final class PipelineQueueTests: XCTestCase {
         XCTAssertEqual(freshQueue.jobs.count, 0)
     }
 
+    func testRecoverSkipsProcessedFiles() throws {
+        let recDir = tmpDir.appendingPathComponent("recordings")
+        try FileManager.default.createDirectory(at: recDir, withIntermediateDirectories: true)
+
+        let mixFile = recDir.appendingPathComponent("20260311_100000_mix.wav")
+        try Data(repeating: 0xFF, count: 100).write(to: mixFile)
+
+        // Mark it as already processed
+        let freshQueue = PipelineQueue(logDir: tmpDir)
+        freshQueue.markProcessed(mixPath: mixFile)
+
+        freshQueue.recoverOrphanedRecordings(recordingsDir: recDir)
+        XCTAssertEqual(freshQueue.jobs.count, 0)
+    }
+
+    func testMarkProcessedPersists() throws {
+        let mixPath = tmpDir.appendingPathComponent("test_mix.wav")
+
+        let q1 = PipelineQueue(logDir: tmpDir)
+        q1.markProcessed(mixPath: mixPath)
+
+        // New queue instance should see the processed path
+        let q2 = PipelineQueue(logDir: tmpDir)
+        let recDir = tmpDir.appendingPathComponent("recordings")
+        try FileManager.default.createDirectory(at: recDir, withIntermediateDirectories: true)
+        // Create a file with the same standardized name
+        try Data(repeating: 0xFF, count: 100).write(to: mixPath)
+
+        // Won't find it if the path is in processed list — but the file is in tmpDir not recDir
+        // So test directly via the processed set behavior
+        let processedPath = tmpDir.appendingPathComponent("processed_recordings.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: processedPath.path))
+        let data = try Data(contentsOf: processedPath)
+        let paths = try JSONDecoder().decode([String].self, from: data)
+        XCTAssertTrue(paths.contains(mixPath.standardizedFileURL.path))
+    }
+
     func testRecoverEmptyDirIsNoOp() {
         let recDir = tmpDir.appendingPathComponent("nonexistent_recordings")
         let freshQueue = PipelineQueue(logDir: tmpDir)
