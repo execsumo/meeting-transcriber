@@ -98,6 +98,44 @@ final class ProtocolGeneratorTests: XCTestCase {
         XCTAssertTrue(txt.hasSuffix(".txt"))
     }
 
+    // MARK: - Slug Sanitization (Path Traversal Prevention)
+
+    func testSanitizeSlugStripsPathSeparators() {
+        let slug = ProtocolGenerator.sanitizeSlug("../../etc/passwd")
+        XCTAssertFalse(slug.contains("/"), "Slug must not contain path separators")
+        XCTAssertFalse(slug.contains(".."), "Slug must not contain directory traversal")
+        XCTAssertEqual(slug, "etcpasswd")
+    }
+
+    func testSanitizeSlugStripsDotsOnly() {
+        let slug = ProtocolGenerator.sanitizeSlug("my.meeting.title")
+        XCTAssertFalse(slug.contains("."), "Slug must not contain dots")
+        XCTAssertEqual(slug, "mymeetingtitle")
+    }
+
+    func testSanitizeSlugPreservesAlphanumericAndHyphens() {
+        let slug = ProtocolGenerator.sanitizeSlug("Team-Meeting 2024")
+        XCTAssertEqual(slug, "team-meeting_2024")
+    }
+
+    func testSanitizeSlugEmptyTitleFallback() {
+        let slug = ProtocolGenerator.sanitizeSlug("///")
+        XCTAssertEqual(slug, "meeting", "Empty slug after sanitization should fall back to 'meeting'")
+    }
+
+    func testSanitizeSlugSpecialCharacters() {
+        let slug = ProtocolGenerator.sanitizeSlug("Meeting <script>alert('xss')</script>")
+        XCTAssertFalse(slug.contains("<"), "Slug must not contain angle brackets")
+        XCTAssertFalse(slug.contains(">"), "Slug must not contain angle brackets")
+        XCTAssertFalse(slug.contains("'"), "Slug must not contain quotes")
+    }
+
+    func testFilenameWithPathTraversalTitle() {
+        let name = ProtocolGenerator.filename(title: "../../etc/passwd", ext: "md")
+        XCTAssertFalse(name.contains("/"), "Filename must not contain path separators")
+        XCTAssertTrue(name.hasSuffix("_etcpasswd.md"))
+    }
+
     // MARK: - File Save Operations
 
     func testSaveTranscript() throws {

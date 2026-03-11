@@ -324,12 +324,25 @@ struct ProtocolGenerator {
     }
 
     /// Generate a filename: `{yyyyMMdd_HHmm}_{slug}.{ext}`
+    ///
+    /// The title is sanitized to prevent path traversal: only alphanumeric
+    /// characters, hyphens, and underscores are kept.
     static func filename(title: String, ext: String) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmm"
         let date = formatter.string(from: Date())
-        let slug = title.lowercased().replacingOccurrences(of: " ", with: "_")
+        let slug = sanitizeSlug(title)
         return "\(date)_\(slug).\(ext)"
+    }
+
+    /// Sanitize a title into a safe filename slug.
+    /// Keeps only alphanumeric characters, hyphens, and underscores.
+    static func sanitizeSlug(_ title: String) -> String {
+        let lowered = title.lowercased().replacingOccurrences(of: " ", with: "_")
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let filtered = lowered.unicodeScalars.filter { allowed.contains($0) }
+        let slug = String(String.UnicodeScalarView(filtered))
+        return slug.isEmpty ? "meeting" : slug
     }
 }
 
