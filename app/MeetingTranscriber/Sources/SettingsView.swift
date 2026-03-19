@@ -516,7 +516,7 @@ struct SettingsView: View {
         let url = AppPaths.customPromptFile
         if !FileManager.default.fileExists(atPath: url.path) {
             ensurePromptDirectory()
-            try? ProtocolGenerator.protocolPrompt.write(to: url, atomically: true, encoding: .utf8)
+            try? ProtocolGenerator.protocolPrompt(language: settings.transcriptionLanguageName).write(to: url, atomically: true, encoding: .utf8)
         }
         NSWorkspace.shared.open(url)
     }
