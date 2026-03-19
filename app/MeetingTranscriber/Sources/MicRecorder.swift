@@ -146,9 +146,11 @@ class MicRecorder {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain,
             )
-            var uid: CFString = "" as CFString
-            var uidSize = UInt32(MemoryLayout<CFString>.size)
-            guard AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &uid) == noErr else { continue }
+            var uid: Unmanaged<CFString>?
+            var uidSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+            guard AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &uid) == noErr,
+                  let uidStr = uid?.takeRetainedValue() as String?
+            else { continue }
 
             // Get name
             var nameAddress = AudioObjectPropertyAddress(
@@ -156,11 +158,13 @@ class MicRecorder {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain,
             )
-            var name: CFString = "" as CFString
-            var nameSize = UInt32(MemoryLayout<CFString>.size)
-            guard AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &name) == noErr else { continue }
+            var name: Unmanaged<CFString>?
+            var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+            guard AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &name) == noErr,
+                  let nameStr = name?.takeRetainedValue() as String?
+            else { continue }
 
-            results.append((uid: uid as String, name: name as String, channels: inputChannels))
+            results.append((uid: uidStr, name: nameStr, channels: inputChannels))
         }
         return results
     }
@@ -180,12 +184,12 @@ class MicRecorder {
             mElement: kAudioObjectPropertyElementMain,
         )
 
-        let status = withUnsafeMutablePointer(to: &cfUID) { uidPtr in
-            withUnsafeMutablePointer(to: &deviceID) { devPtr in
+        let status = withUnsafeMutablePointer(to: &cfUID) { uidPtr -> OSStatus in
+            withUnsafeMutablePointer(to: &deviceID) { devPtr -> OSStatus in
                 var translation = AudioValueTranslation(
-                    mInputData: uidPtr,
+                    mInputData: UnsafeMutableRawPointer(uidPtr),
                     mInputDataSize: UInt32(MemoryLayout<CFString>.size),
-                    mOutputData: devPtr,
+                    mOutputData: UnsafeMutableRawPointer(devPtr),
                     mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size),
                 )
                 var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)

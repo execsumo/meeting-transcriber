@@ -137,9 +137,8 @@ final class FluidTranscriptionEngine {
 
             // Because FluidAudio provides TokenTiming which is per-token (word/subword level),
             // we should probably reconstruct sentences instead of emitting one segment per token.
-            // Wait, WhisperKit gave us full phrases/sentences (~3-5s).
-            // FluidAudio's token timings might be very granular.
-            // Let's group them by a small pause threshold (e.g. 0.5s) to form segments.
+            // FluidAudio's token timings are per-token (word/subword level).
+            // Group them by punctuation and pauses to form sentence segments.
             print("Token: \(text) [\(timing.startTime) - \(timing.endTime)]")
         }
         
