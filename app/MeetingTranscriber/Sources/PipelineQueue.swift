@@ -362,6 +362,14 @@ class PipelineQueue {
                             let matched = matcher.match(embeddings: embeddings)
                             autoNames = matched
 
+                            // In dual-track mode, assign micLabel to mic speakers (M_ prefix)
+                            // when the user set a mic speaker name in settings
+                            if useDualTrack, !micLabel.isEmpty {
+                                for key in autoNames.keys where key.hasPrefix("M_") {
+                                    autoNames[key] = micLabel
+                                }
+                            }
+
                             // Pre-match participants to remaining speakers
                             if !participants.isEmpty {
                                 autoNames = SpeakerMatcher.preMatchParticipants(
