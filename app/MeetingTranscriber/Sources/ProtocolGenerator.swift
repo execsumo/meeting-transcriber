@@ -10,9 +10,9 @@ protocol ProtocolGenerating {
 
 /// Shared protocol utilities: prompts, file operations, and error types.
 enum ProtocolGenerator {
-    static let protocolPrompt = """
+    static let protocolPromptTemplate = """
     You are a professional meeting minute taker.
-    Create a structured meeting protocol in German from the following transcript.
+    Create a structured meeting protocol in {LANGUAGE} from the following transcript.
 
     Return ONLY the finished Markdown document - no explanations, no introduction,
     no comments before or after.
@@ -71,18 +71,28 @@ enum ProtocolGenerator {
 
     """
 
+    /// Convenience accessor using the default language (English).
+    static var protocolPrompt: String {
+        protocolPrompt(language: "English")
+    }
+
+    /// Resolve the prompt template with the given language.
+    static func protocolPrompt(language: String) -> String {
+        protocolPromptTemplate.replacingOccurrences(of: "{LANGUAGE}", with: language)
+    }
+
     /// Load the protocol prompt, preferring a custom file over the built-in default.
     ///
     /// Reads `AppPaths.customPromptFile` if it exists and is non-empty,
-    /// otherwise falls back to the hardcoded `protocolPrompt`.
-    static func loadPrompt() -> String {
+    /// otherwise falls back to the built-in template with the configured language.
+    static func loadPrompt(language: String = "English") -> String {
         let url = AppPaths.customPromptFile
         if let custom = try? String(contentsOf: url, encoding: .utf8),
            !custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             logger.info("Using custom protocol prompt from \(url.path)")
             return custom
         }
-        return protocolPrompt
+        return protocolPrompt(language: language)
     }
 
     // MARK: - File Operations

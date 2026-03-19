@@ -78,9 +78,14 @@ final class AppSettings {
         didSet { defaults.set(transcriptionModel, forKey: "transcriptionModel") }
     }
 
-    /// Transcription language
+    /// Transcription language code (e.g. "en").
     var transcriptionLanguage: String = defaults.object(forKey: "transcriptionLanguage") as? String ?? "en" {
         didSet { defaults.set(transcriptionLanguage, forKey: "transcriptionLanguage") }
+    }
+
+    /// Display name for the current transcription language (used in protocol prompt).
+    var transcriptionLanguageName: String {
+        Locale(identifier: "en").localizedString(forLanguageCode: transcriptionLanguage) ?? "English"
     }
 
     var diarize: Bool = defaults.object(forKey: "diarize") as? Bool ?? true {
