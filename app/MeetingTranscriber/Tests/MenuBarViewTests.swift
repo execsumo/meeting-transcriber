@@ -497,6 +497,41 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertNoThrow(try body.find(text: "Failed"))
     }
 
+    func testWarningJobShowsWarningText() throws {
+        let queue = PipelineQueue()
+        let job = PipelineJob(
+            meetingTitle: "Standup",
+            appName: "Teams",
+            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
+            appPath: nil,
+            micPath: nil,
+            micDelay: 0,
+        )
+        queue.enqueue(job)
+        queue.addWarning(id: job.id, "Diarization failed — speakers not identified")
+        queue.updateJobState(id: job.id, to: .done)
+
+        let sut = MenuBarView(
+            status: makeStatus(),
+            isWatching: false,
+            pipelineQueue: queue,
+            updateChecker: nil,
+            onStartStop: {},
+            onRecordApp: {},
+            onStopManualRecording: nil,
+            onOpenLastProtocol: {},
+            onOpenProtocol: { _ in },
+            onOpenProtocolsFolder: {},
+            onOpenSettings: {},
+            onNameSpeakers: nil,
+            onProcessFiles: {},
+            onDismissJob: { _ in },
+            onQuit: {},
+        )
+        let body = try sut.inspect()
+        XCTAssertNoThrow(try body.find(text: "Diarization failed — speakers not identified"))
+    }
+
     // MARK: - Record App button
 
     func testRecordAppButtonExistsWhenIdle() throws {
