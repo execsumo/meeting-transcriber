@@ -39,7 +39,7 @@ Add Handy-style dictation to the menu bar app: hold a configurable hotkey → sp
    - Enable/disable dictation toggle
    - Hotkey picker (record a key combination)
    - Post-processing toggle + prompt selection (see below)
-   - Custom words list (see below)
+   - Custom vocabulary already implemented (tag chip UI in Settings)
 
 5. **Menu bar integration** (~30-50 lines, edit `MenuBarView.swift`)
    - Visual indicator when dictation is active (recording state)
@@ -59,37 +59,34 @@ Optional LLM cleanup of the raw transcript before pasting, matching Handy's appr
 - Strip filler words list: configurable `custom_filler_words` that are removed before/after LLM processing
 - Consider two hotkey bindings: one for raw dictation, one for dictation + post-processing (Handy's `--toggle-transcription` vs `--toggle-post-process` pattern)
 
-#### Custom words / vocabulary guidance
+#### Custom vocabulary (FluidAudio native) — DONE
 
-Guide transcription toward domain-specific terminology (project names, technical terms, proper nouns). Shared between dictation and meeting transcription.
+**Status:** Implemented (`feature/custom-vocabulary` branch)
 
-**How Handy does it:** Dual strategy depending on the transcription engine:
-1. **Whisper models:** Passes `custom_words` as the `initial_prompt` parameter, which biases the autoregressive decoder toward those words.
-2. **Parakeet (non-Whisper):** Applies fuzzy post-correction via `apply_custom_words()` — a text-level correction pass after transcription using Levenshtein distance + Soundex phonetic matching. A configurable `word_correction_threshold` (0.0–1.0) controls match strictness. N-gram matching (3→2→1 words) handles multi-word terms. Case and punctuation are preserved in replacements.
-3. **Filler word removal:** Separate `custom_filler_words` list + built-in language-specific filler words, stripped from output via `filter_transcription_output()`.
+Uses FluidAudio's built-in acoustic-level vocabulary boosting via a second CTC encoder (Parakeet 110M) that scores custom terms against the audio signal. More accurate than Handy's text-level fuzzy matching. CTC models downloaded on first use (~50 MB, +~64 MB peak RAM).
 
-**Implementation for meeting-transcriber:**
-- Since we use Parakeet (CTC/TDT model), follow Handy's approach 2: fuzzy post-correction after transcription
-- Implement `applyCustomWords()` with Levenshtein + phonetic matching (Swift has no built-in Soundex but it's ~30 lines)
-- N-gram matching (up to 3-grams) to handle multi-word terms like "Meeting Transcriber" or "FluidAudio"
-- Configurable threshold in settings (default ~0.3, same as Handy)
-- Filler word removal: configurable list + built-in defaults (um, uh, like, you know, etc.)
-- Same custom words list feeds into meeting transcription pipeline (pass to protocol generation prompt for additional context)
-- Settings: list editor for custom words + filler words, shared between dictation and meeting transcription
-- **Effort:** ~150-200 lines for the text correction logic, ~50-80 lines for settings UI
+**What was built (208 lines across 8 files):**
+- `AppSettings.customVocabulary: [String]` — persisted to UserDefaults
+- `FluidTranscriptionEngine.configureVocabulary()` — downloads CTC models on first use, calls `AsrManager.configureVocabularyBoosting()`, skips if terms unchanged
+- `PipelineQueue` threads vocabulary to transcription; all call sites benefit automatically
+- `ProtocolGenerator.vocabularyNote()` — appends domain terms to LLM protocol prompt (both Claude CLI and OpenAI providers)
+- Tag chip UI in Settings: text field + Enter/Add, capsule tags with × remove, `FlowLayout` wrapping, validation (4+ chars, no duplicates)
 
-#### Effort estimate
+**Remaining stretch goals:**
+- Alias support per term (FluidAudio supports `CustomVocabularyTerm(text:aliases:)`)
+- Filler word removal (configurable list + built-in defaults)
+
+#### Effort estimate (remaining dictation work)
 
 | Component | Lines | Files |
 |---|---|---|
 | Global hotkey manager | ~200-300 | 1 new (`HotkeyManager.swift`) |
 | Dictation controller + text insertion | ~200-280 | 1 new (`DictationController.swift`) |
 | Post-processing via LLM | ~150-200 | 1 new (`DictationPostProcessor.swift`) |
-| Custom words (fuzzy correction + filler removal) | ~200-280 | 1 new (`TextCorrector.swift`) |
-| Settings UI + model | ~200-250 | Edit `SettingsView.swift` + `AppSettings.swift` |
+| Settings UI (dictation controls) | ~100-150 | Edit `SettingsView.swift` + `AppSettings.swift` |
 | Menu bar integration | ~30-50 | Edit `MenuBarView.swift` |
-| Tests | ~300-400 | 2-3 new test files |
-| **Total** | **~1300-1800** | **4-5 new + edits to 4-5 existing** |
+| Tests | ~200-300 | 2-3 new test files |
+| **Total** | **~900-1300** | **3 new + edits to 3-4 existing** |
 
 ## Low Priority
 
