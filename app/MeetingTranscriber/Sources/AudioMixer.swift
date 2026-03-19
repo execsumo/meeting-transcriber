@@ -407,14 +407,27 @@ enum AudioMixer {
         try? FileManager.default.removeItem(at: url)
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
-        let outputSettings: [String: Any] = [
+
+        // Try explicit bitrate first, fall back to encoder default if not supported
+        var outputSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: bitRate,
+            AVEncoderBitRatePerChannelKey: bitRate,
         ]
-        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: outputSettings)
+        var input = AVAssetWriterInput(mediaType: .audio, outputSettings: outputSettings)
         input.expectsMediaDataInRealTime = false
+
+        if !writer.canAdd(input) {
+            // Retry without explicit bitrate — let the encoder choose
+            outputSettings = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: 1,
+            ]
+            input = AVAssetWriterInput(mediaType: .audio, outputSettings: outputSettings)
+            input.expectsMediaDataInRealTime = false
+        }
 
         guard writer.canAdd(input) else {
             throw AudioMixerError.formatCreationFailed
