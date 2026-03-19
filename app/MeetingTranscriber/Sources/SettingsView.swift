@@ -31,17 +31,8 @@ struct SettingsView: View {
         ("parakeet-tdt-0.6b-v2-coreml", "Parakeet TDT V2 0.6B (English)"),
     ]
 
-    private let whisperLanguages: [(code: String, label: String)] = [
-        ("", "Auto-detect"),
-        ("de", "Deutsch"),
+    private let transcriptionLanguages: [(code: String, label: String)] = [
         ("en", "English"),
-        ("fr", "Fran\u{00E7}ais"),
-        ("es", "Espa\u{00F1}ol"),
-        ("it", "Italiano"),
-        ("nl", "Nederlands"),
-        ("pt", "Portugu\u{00EA}s"),
-        ("ja", "日本語"),
-        ("zh", "中文"),
     ]
 
     var body: some View {
@@ -112,7 +103,7 @@ struct SettingsView: View {
                 }
 
                 Picker("Language", selection: $settings.transcriptionLanguage) {
-                    ForEach(whisperLanguages, id: \.code) { lang in
+                    ForEach(transcriptionLanguages, id: \.code) { lang in
                         Text(lang.label).tag(lang.code)
                     }
                 }
