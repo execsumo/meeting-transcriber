@@ -120,12 +120,10 @@ final class FluidTranscriptionEngine {
 
         transcriptionProgress = 0
 
-        // Listen to progress in the background
-        let progressTask = Task {
-            for try await progress in await manager.transcriptionProgressStream {
-                await MainActor.run {
-                    self.transcriptionProgress = progress
-                }
+        // Listen to progress on the main actor (manager is non-Sendable)
+        let progressTask = Task { @MainActor in
+            for try await progress in manager.transcriptionProgressStream {
+                self.transcriptionProgress = progress
             }
         }
 
