@@ -129,10 +129,10 @@ FluidAudio requires 16kHz mono input. Both app and mic tracks are resampled befo
 
 ### FluidTranscriptionEngine
 
-- **Model:** `parakeet-tdt-0.6b-v2-coreml` (CoreML/ANE via FluidAudio)
+- **Models:** `parakeet-tdt-0.6b-v2-coreml` (English only) or `parakeet-tdt-0.6b-v3-coreml` (25 languages) via FluidAudio CoreML/ANE
 - **Pre-loading:** Model downloaded and loaded at app launch
 - **Lazy fallback:** `ensureModel()` loads on-demand if not ready
-- **Language:** English only (Parakeet TDT V2)
+- **Languages:** V2 English only; V3 supports bg, hr, cs, da, nl, en, et, fi, fr, de, el, hu, it, lv, lt, mt, pl, pt, ro, ru, sk, sl, es, sv, uk
 - **Vocabulary boosting:** Optional CTC-based custom vocabulary via `configureVocabulary()`
 
 ### Modes
@@ -195,7 +195,7 @@ When dual-source recording (app + mic) is available:
 /usr/bin/env claude -p - --output-format stream-json --verbose --model sonnet
 ```
 
-- **Input:** German protocol prompt + transcript piped to stdin
+- **Input:** Protocol prompt (language configurable) + transcript piped to stdin
 - **Output:** Stream-json parsed line-by-line (content_block_delta + assistant message)
 - **Environment:** `CLAUDECODE` env var stripped to allow nested invocation
 - **Timeout:** 10 minutes

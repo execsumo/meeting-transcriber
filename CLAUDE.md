@@ -150,7 +150,7 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
 ## Conventions
 
 - All code and UI text in English
-- Protocol output generated in German (via Claude prompt)
+- Protocol output generated in English by default (language configurable in Settings)
 
 ## Architecture Notes
 
