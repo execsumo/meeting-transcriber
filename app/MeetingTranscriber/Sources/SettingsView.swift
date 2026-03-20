@@ -31,11 +31,44 @@ struct SettingsView: View {
 
     private let transcriptionModels: [(variant: String, label: String)] = [
         ("parakeet-tdt-0.6b-v2-coreml", "Parakeet TDT V2 0.6B (English)"),
+        ("parakeet-tdt-0.6b-v3-coreml", "Parakeet TDT V3 0.6B (Multilingual)"),
     ]
 
-    private let transcriptionLanguages: [(code: String, label: String)] = [
+    private let multilingualLanguages: [(code: String, label: String)] = [
         ("en", "English"),
+        ("bg", "Bulgarian"),
+        ("hr", "Croatian"),
+        ("cs", "Czech"),
+        ("da", "Danish"),
+        ("nl", "Dutch"),
+        ("et", "Estonian"),
+        ("fi", "Finnish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("el", "Greek"),
+        ("hu", "Hungarian"),
+        ("it", "Italian"),
+        ("lv", "Latvian"),
+        ("lt", "Lithuanian"),
+        ("mt", "Maltese"),
+        ("pl", "Polish"),
+        ("pt", "Portuguese"),
+        ("ro", "Romanian"),
+        ("ru", "Russian"),
+        ("sk", "Slovak"),
+        ("sl", "Slovenian"),
+        ("es", "Spanish"),
+        ("sv", "Swedish"),
+        ("uk", "Ukrainian"),
     ]
+
+    private var isMultilingualModel: Bool {
+        settings.transcriptionModel.contains("-v3-")
+    }
+
+    private var availableLanguages: [(code: String, label: String)] {
+        isMultilingualModel ? multilingualLanguages : [("en", "English")]
+    }
 
     var body: some View {
         // swiftlint:disable:next closure_body_length
@@ -105,8 +138,14 @@ struct SettingsView: View {
                 }
 
                 Picker("Language", selection: $settings.transcriptionLanguage) {
-                    ForEach(transcriptionLanguages, id: \.code) { lang in
+                    ForEach(availableLanguages, id: \.code) { lang in
                         Text(lang.label).tag(lang.code)
+                    }
+                }
+                .disabled(!isMultilingualModel)
+                .onChange(of: settings.transcriptionModel) {
+                    if !isMultilingualModel {
+                        settings.transcriptionLanguage = "en"
                     }
                 }
 

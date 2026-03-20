@@ -52,7 +52,16 @@ enum TranscriptionError: LocalizedError {
 @MainActor
 @Observable
 final class FluidTranscriptionEngine {
-    var modelVariant = "parakeet-tdt-0.6b-v2-coreml"
+    var modelVariant = "parakeet-tdt-0.6b-v2-coreml" {
+        didSet {
+            guard modelVariant != oldValue else { return }
+            // Force reload when model variant changes
+            manager = nil
+            modelState = .unloaded
+            loadingTask = nil
+        }
+    }
+
     private(set) var modelState: ModelState = .unloaded
     private(set) var downloadProgress: Double = 0
     private(set) var transcriptionProgress: Double = 0
@@ -62,6 +71,11 @@ final class FluidTranscriptionEngine {
     private var ctcModels: CtcModels?
     /// The vocabulary terms currently configured on the manager (empty = disabled).
     private var activeVocabularyTerms: [String] = []
+
+    /// Derive the FluidAudio model version from the variant string.
+    private var modelVersion: AsrModels.ModelVersion {
+        modelVariant.contains("-v3-") ? .v3 : .v2
+    }
 
     func loadModel() async {
         if let existing = loadingTask {
@@ -75,7 +89,7 @@ final class FluidTranscriptionEngine {
 
             do {
                 let models = try await AsrModels.downloadAndLoad(
-                    version: .v2,
+                    version: modelVersion,
                     progressHandler: { progress in
                         Task { @MainActor in
                             self.downloadProgress = progress.fractionCompleted
