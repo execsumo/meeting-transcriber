@@ -14,10 +14,12 @@ struct MeetingTranscriberApp: App {
     @State private var pipelineQueue = PipelineQueue()
     @State private var iconAnimationFrame = 0
     @State private var updateChecker = UpdateChecker()
+    @State private var dictationService: DictationService?
     @Environment(\.openWindow)
     private var openWindow
     private let notifications = NotificationManager.shared
     private let transcriptionEngine = FluidTranscriptionEngine()
+    private let hotkeyManager = GlobalHotkeyManager()
     private let iconTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     private var isWatching: Bool {
@@ -43,6 +45,7 @@ struct MeetingTranscriberApp: App {
                 status: currentStatus,
                 isWatching: isWatching,
                 pipelineQueue: pipelineQueue,
+                dictationService: dictationService,
                 updateChecker: updateChecker,
                 onStartStop: toggleWatching,
                 onRecordApp: { bringWindowToFront(id: "record-app") },
@@ -60,6 +63,7 @@ struct MeetingTranscriberApp: App {
                     bringWindowToFront(id: "speaker-naming")
                 },
                 onProcessFiles: processAudioFiles,
+                onToggleDictation: settings.dictationEnabled ? { toggleDictation() } : nil,
                 onDismissJob: { id in pipelineQueue.removeJob(id: id) },
                 onQuit: quit,
             )
@@ -91,6 +95,9 @@ struct MeetingTranscriberApp: App {
             }
             .task {
                 updateChecker.startPeriodicChecks(settings: settings)
+            }
+            .task {
+                setupDictation()
             }
         }
 
@@ -165,6 +172,9 @@ struct MeetingTranscriberApp: App {
     }
 
     private var currentStateLabel: String {
+        if let dictation = dictationService, dictation.isActive {
+            return dictation.state == .finalizing ? "Transcribing..." : "Dictating..."
+        }
         if let loop = watchLoop, loop.isActive {
             return loop.transcriberState.label
         }
@@ -172,6 +182,10 @@ struct MeetingTranscriberApp: App {
     }
 
     private var currentBadge: BadgeKind {
+        // Dictation active
+        if let dictation = dictationService, dictation.isActive {
+            return dictation.state == .finalizing ? .transcribing : .recording
+        }
         // Manual / auto recording via WatchLoop
         if let loop = watchLoop, loop.isActive {
             if loop.state == .recording { return .recording }
@@ -422,8 +436,66 @@ struct MeetingTranscriberApp: App {
         NSWorkspace.shared.open(protocols)
     }
 
+    // MARK: - Dictation
+
+    private func setupDictation() {
+        let service = DictationService(transcriptionEngine: transcriptionEngine)
+        dictationService = service
+
+        hotkeyManager.updateShortcut(settings.dictationShortcut)
+        hotkeyManager.updateMode(
+            GlobalHotkeyManager.Mode(rawValue: settings.dictationMode) ?? .toggle
+        )
+
+        // Both modes use the same toggle logic — check service.isActive to decide
+        hotkeyManager.onStart = { [weak service] in
+            guard let service else { return }
+            Task { @MainActor in
+                if service.isActive {
+                    await service.stop(customVocabulary: self.settings.customVocabulary)
+                } else {
+                    await service.start(
+                        micDeviceUID: self.settings.micDeviceUID.isEmpty ? nil : self.settings.micDeviceUID
+                    )
+                }
+            }
+        }
+
+        if settings.dictationMode == "pushToTalk" {
+            hotkeyManager.onStop = { [weak service] in
+                guard let service else { return }
+                Task { @MainActor in
+                    if service.isActive {
+                        await service.stop(customVocabulary: self.settings.customVocabulary)
+                    }
+                }
+            }
+        }
+
+        if settings.dictationEnabled {
+            hotkeyManager.enable()
+        }
+    }
+
+    private func toggleDictation() {
+        guard let service = dictationService else { return }
+        if service.isActive {
+            Task {
+                await service.stop(customVocabulary: settings.customVocabulary)
+            }
+        } else {
+            Task {
+                await service.start(
+                    micDeviceUID: settings.micDeviceUID.isEmpty ? nil : settings.micDeviceUID
+                )
+            }
+        }
+    }
+
     private func quit() {
         watchLoop?.stop()
+        dictationService?.cancel()
+        hotkeyManager.disable()
         NSApplication.shared.terminate(nil)
     }
 }

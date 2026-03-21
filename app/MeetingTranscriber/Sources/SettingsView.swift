@@ -222,6 +222,43 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Dictation") {
+                Toggle("Enable Dictation Hotkey", isOn: $settings.dictationEnabled)
+
+                if settings.dictationEnabled {
+                    HStack {
+                        Text("Hotkey")
+                        Spacer()
+                        Text(settings.dictationShortcut.displayString)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary))
+                        ShortcutRecorderButton(shortcut: Binding(
+                            get: { settings.dictationShortcut },
+                            set: { settings.dictationShortcut = $0 }
+                        ))
+                    }
+
+                    Picker("Mode", selection: $settings.dictationMode) {
+                        Text("Toggle (press to start/stop)").tag("toggle")
+                        Text("Push-to-Talk (hold to record)").tag("pushToTalk")
+                    }
+
+                    if !accessibilityOK {
+                        Label(
+                            "Accessibility permission required for global hotkeys",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    }
+
+                    Text("Uses the same custom vocabulary and transcription model as meeting transcription.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             // swiftlint:disable:next closure_body_length
             Section("Protocol Generation") {
                 Picker("LLM Provider", selection: $settings.protocolProvider) {
@@ -399,7 +436,7 @@ struct SettingsView: View {
                 )
                 PermissionRow(
                     label: "Accessibility",
-                    detail: "Optional — enables mute detection and meeting naming",
+                    detail: "Required for dictation hotkey, optional for mute detection",
                     granted: accessibilityOK,
                     optional: true,
                     help: "System Settings → Privacy & Security → Accessibility → enable Meeting Transcriber",
@@ -661,6 +698,82 @@ struct SettingsView: View {
             position: .unspecified,
         )
         audioDevices = session.devices.map { (id: $0.uniqueID, name: $0.localizedName) }
+    }
+}
+
+/// Button that records a keyboard shortcut when clicked.
+struct ShortcutRecorderButton: View {
+    @Binding var shortcut: HotkeyShortcut
+    @State private var isRecording = false
+
+    var body: some View {
+        Button(isRecording ? "Press keys..." : "Record") {
+            isRecording = true
+        }
+        .font(.caption)
+        .onKeyPress(phases: .down) { keyPress in
+            guard isRecording else { return .ignored }
+            let modifiers = keyPress.modifiers
+            guard !modifiers.isEmpty else { return .ignored }
+
+            // Map SwiftUI EventModifiers to NSEvent.ModifierFlags
+            var nsFlags: NSEvent.ModifierFlags = []
+            if modifiers.contains(.command) { nsFlags.insert(.command) }
+            if modifiers.contains(.option) { nsFlags.insert(.option) }
+            if modifiers.contains(.shift) { nsFlags.insert(.shift) }
+            if modifiers.contains(.control) { nsFlags.insert(.control) }
+
+            // Map character to key code (approximate — covers common keys)
+            let keyCode = Self.keyCodeFromCharacter(keyPress.characters)
+
+            shortcut = HotkeyShortcut(keyCode: keyCode, modifierFlags: nsFlags.rawValue)
+            isRecording = false
+            return .handled
+        }
+    }
+
+    /// Best-effort mapping from character string to virtual key code.
+    private static func keyCodeFromCharacter(_ chars: String) -> UInt16 {
+        guard let char = chars.lowercased().first else { return 0 }
+        switch char {
+        case "a": 0x00
+        case "s": 0x01
+        case "d": 0x02
+        case "f": 0x03
+        case "h": 0x04
+        case "g": 0x05
+        case "z": 0x06
+        case "x": 0x07
+        case "c": 0x08
+        case "v": 0x09
+        case "b": 0x0B
+        case "q": 0x0C
+        case "w": 0x0D
+        case "e": 0x0E
+        case "r": 0x0F
+        case "y": 0x10
+        case "t": 0x11
+        case "1": 0x12
+        case "2": 0x13
+        case "3": 0x14
+        case "4": 0x15
+        case "5": 0x17
+        case "6": 0x16
+        case "7": 0x1A
+        case "8": 0x1C
+        case "9": 0x19
+        case "0": 0x1D
+        case "o": 0x1F
+        case "u": 0x20
+        case "i": 0x22
+        case "p": 0x23
+        case "l": 0x25
+        case "j": 0x26
+        case "k": 0x28
+        case "n": 0x2D
+        case "m": 0x2E
+        default: 0
+        }
     }
 }
 

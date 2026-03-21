@@ -4,6 +4,7 @@ struct MenuBarView: View {
     let status: TranscriberStatus?
     let isWatching: Bool
     let pipelineQueue: PipelineQueue
+    var dictationService: DictationService?
     var updateChecker: UpdateChecker?
     let onStartStop: () -> Void
     let onRecordApp: () -> Void
@@ -14,6 +15,7 @@ struct MenuBarView: View {
     let onOpenSettings: () -> Void
     let onNameSpeakers: (() -> Void)?
     let onProcessFiles: () -> Void
+    let onToggleDictation: (() -> Void)?
     let onDismissJob: (UUID) -> Void
     let onQuit: () -> Void
 
@@ -103,6 +105,30 @@ struct MenuBarView: View {
             Label("Process Audio/Video Files...", systemImage: "doc.badge.plus")
         }
         .keyboardShortcut("p")
+
+        if let onToggleDictation {
+            Divider()
+            Button {
+                onToggleDictation()
+            } label: {
+                if let dictation = dictationService, dictation.isActive {
+                    Label("Stop Dictation", systemImage: "mic.fill")
+                } else {
+                    Label("Start Dictation", systemImage: "mic")
+                }
+            }
+            .keyboardShortcut("d")
+
+            if let dictation = dictationService, dictation.isActive {
+                if !dictation.partialText.isEmpty {
+                    Text(dictation.partialText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .padding(.horizontal, 4)
+                }
+            }
+        }
 
         // Processing queue
         if !pipelineQueue.jobs.isEmpty {

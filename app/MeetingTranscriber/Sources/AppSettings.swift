@@ -201,6 +201,36 @@ final class AppSettings {
         customOutputDir ?? AppPaths.downloadsProtocolsDir
     }
 
+    // MARK: - Dictation
+
+    /// Enable dictation feature (global hotkey).
+    var dictationEnabled: Bool = defaults.object(forKey: "dictationEnabled") as? Bool ?? false {
+        didSet { defaults.set(dictationEnabled, forKey: "dictationEnabled") }
+    }
+
+    /// Hotkey mode: toggle (press to start/stop) or push-to-talk (hold to record).
+    var dictationMode: String = defaults.object(forKey: "dictationMode") as? String ?? "toggle" {
+        didSet { defaults.set(dictationMode, forKey: "dictationMode") }
+    }
+
+    /// Hotkey shortcut (serialized as JSON).
+    var dictationShortcutData: Data? {
+        get { defaults.data(forKey: "dictationShortcut") }
+        set { defaults.set(newValue, forKey: "dictationShortcut") }
+    }
+
+    var dictationShortcut: HotkeyShortcut {
+        get {
+            guard let data = dictationShortcutData,
+                  let shortcut = try? JSONDecoder().decode(HotkeyShortcut.self, from: data)
+            else { return .default }
+            return shortcut
+        }
+        set {
+            dictationShortcutData = try? JSONEncoder().encode(newValue)
+        }
+    }
+
     // MARK: - Updates
 
     var checkForUpdates: Bool = defaults.object(forKey: "checkForUpdates") as? Bool ?? true {
