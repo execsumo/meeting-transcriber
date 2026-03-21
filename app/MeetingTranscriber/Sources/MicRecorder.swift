@@ -175,7 +175,7 @@ class MicRecorder {
     // MARK: - Private
 
     /// Set the input device on an AVAudioEngine by CoreAudio UID.
-    private static func setInputDevice(uid: String, on engine: AVAudioEngine) throws {
+    static func setInputDevice(uid: String, on engine: AVAudioEngine) throws {
         let inputNode = engine.inputNode
         var deviceID = AudioDeviceID(0)
 
